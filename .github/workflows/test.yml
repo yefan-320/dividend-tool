@@ -17,8 +17,10 @@ jobs:
         run: node --test test/*.test.js
       - name: 静态检查（index/sw/import/manifest/数据引用）
         run: node tools/check-static.mjs
-      - name: 数据体检（覆盖/一致性/引擎自检）
+      - name: 数据体检（覆盖/一致性/新鲜度/引擎自检）
         run: node tools/audit-app.mjs
+      - name: 首屏性能预算（数据/JS gzip 体积、懒加载结构）
+        run: node tools/check-budget.mjs
       - name: 浏览器冒烟（36 项，本地静态服务 + 无头 Chrome）
         run: |
           mkdir -p ../report/design

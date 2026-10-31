@@ -42,6 +42,31 @@ stats.quoteDates = [...dateCount.entries()].sort((a, b) => b[1] - a[1]).slice(0,
 const stale = [...dateCount.entries()].filter(([d]) => d < (quotes.generated || '')).reduce((s, [, n]) => s + n, 0);
 if (stale > stats.quotes * 0.01) push('warn', `行情有 ${stale} 只不是最新时点（${quotes.generated}）`);
 
+/* 2.5 数据新鲜度（只告警，不阻断；CI 里时钟与数据时点可能不同，因此不 fail） */
+{
+  const now = new Date();
+  const dayMs = 86400000;
+  const dayAge = (d) => (typeof d === 'string' && d && !Number.isNaN(Date.parse(d)) ? Math.round((now - Date.parse(d)) / dayMs) : null);
+  const quoteAgeDays = dayAge(quotes.generated);
+  const currentYm = now.toISOString().slice(0, 7);
+  const lastMonthlyYm = Object.values(monthly)
+    .map((rows) => (rows && rows.length ? rows[rows.length - 1][0] : ''))
+    .sort().at(-1);
+  const monthsBehind = lastMonthlyYm
+    ? (Number(currentYm.slice(0, 4)) - Number(lastMonthlyYm.slice(0, 4))) * 12 + (Number(currentYm.slice(5, 7)) - Number(lastMonthlyYm.slice(5, 7)))
+    : null;
+  const finAge = finCur.year ? now.getFullYear() - finCur.year : null;
+  stats.freshness = {
+    quoteDate: quotes.generated, quoteAgeDays,
+    lastMonthlyYm, monthlyBehindMonths: monthsBehind,
+    finYear: finCur.year, finYearAge: finAge,
+  };
+  if (quoteAgeDays == null) push('warn', '行情缺少 generated 时间');
+  else if (quoteAgeDays > 10) push('warn', `行情快照 ${quotes.generated} 已 ${quoteAgeDays} 天未更新，建议 node tools/fetch-data.mjs quotes`);
+  if (monthsBehind != null && monthsBehind > 2) push('warn', `月线最后月份 ${lastMonthlyYm} 落后当前 ${monthsBehind} 个月，建议 node tools/fetch-data.mjs monthly`);
+  if (finAge != null && finAge > 1) push('warn', `年报数据停在 ${finCur.year} 年，建议 node tools/fetch-finance.mjs`);
+}
+
 /* 3. 股息率分布 + 异常值 */
 const rows = [];
 for (const [code, info] of Object.entries(baseline.pool || {})) {

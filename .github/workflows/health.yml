@@ -1,0 +1,25 @@
+name: live-health
+
+# 每天检查一次线上站点是否可用（GitHub Pages 部署失败/资源 404 时及时暴露）
+on:
+  schedule:
+    - cron: '0 22 * * *' # UTC 22:00 = 北京时间 06:00
+  workflow_dispatch:
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 线上可用性 + 关键资源
+        run: |
+          set -e
+          base="https://yefan-320.github.io/dividend-tool"
+          for f in "" "sw.js" "src/main.js" "data/finance-core.json" "data/quotes.json" "manifest.webmanifest"; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$base/$f?t=$(date +%s)")
+            echo "$f -> $code"
+            [ "$code" = "200" ] || { echo "FAIL $f"; exit 1; }
+          done
+          sw=$(curl -s --max-time 20 "$base/sw.js")
+          echo "$sw" | grep -q "VERSION = 'd3-" || { echo 'sw VERSION 标识缺失'; exit 1; }
+          echo "$sw" | grep -q "finance-core.json" || { echo 'sw 预缓存缺 finance-core'; exit 1; }
+          echo 'health OK'

@@ -6,7 +6,7 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "node tools/check-static.mjs",
-    "verify": "node --test test/*.test.js && node tools/check-static.mjs && node tools/audit-app.mjs",
+    "verify": "node --test test/*.test.js && node tools/check-static.mjs && node tools/check-budget.mjs && node tools/audit-app.mjs",
     "smoke": "node tools/smoke-all.mjs",
     "shot": "node tools/shot.js",
     "perf": "node tools/perf.mjs",
@@ -15,6 +15,7 @@
     "fetch": "node tools/fetch-data.mjs all",
     "fetch:daily": "node tools/fetch-daily.mjs",
     "fetch:finance": "node tools/fetch-finance.mjs 2011 2025",
-    "derivatives": "node tools/build-derivatives.mjs"
+    "derivatives": "node tools/build-derivatives.mjs",
+    "budget": "node tools/check-budget.mjs"
   }
 }

@@ -125,15 +125,16 @@ src/engine/verdict.js           单股决策：亏损/支付率≥85%/现金流�
 node --test test/*.test.js     # 164 个用例（finance/portfolio/market/verdict/plan/建仓节奏/组合回测/个股回测/数据层/本地账本/格式化/联网解析/差分测试）
 node tools/check-static.mjs    # 静态检查：index.html / sw.js SHELL / import / manifest / 数据文件引用
 node tools/smoke-all.mjs       # 浏览器全站冒烟：5 页 + 4 选股视图 + 3 我的视图 + 方案编辑/执行清单 + 深浅色 + 移动端（36 项）
-node tools/audit-app.mjs       # 数据覆盖/一致性/异常值 + 引擎自检
+node tools/audit-app.mjs       # 数据覆盖/一致性/异常值/新鲜度 + 引擎自检
+node tools/check-budget.mjs    # 首屏性能预算：核心数据/JS gzip 体积、懒加载结构、SW 预缓存
 node tools/perf.mjs            # 冷/热加载性能（含 ECharts 按需加载核验）
 node tools/perf-boot.mjs       # 首屏启动：本地 vs 慢 4G + 4x CPU（骨架出现时间 / 完整首屏）
 node tools/perf-render.mjs     # 各页面 render() 耗时（CPU 4x，比较优化前后）
 node tools/shot.js             # 界面截图 → ../report/design/
 ```
 
-`npm run verify` = 单测 + 静态检查 + 数据体检（不需要浏览器）；`npm run smoke` / `npm run perf` 需要本地 8766 + Chrome 9222。
-每次 `git push main` 后 GitHub Actions 会自动跑四项：164 单测 + 静态检查 + 数据体检 + 浏览器冒烟 36 项（`.github/workflows/test.yml`，CI 里自起静态服务与无头 Chrome），失败会在仓库 Actions 页提示。
+`npm run verify` = 单测 + 静态检查 + 性能预算 + 数据体检（不需要浏览器）；`npm run smoke` / `npm run perf` 需要本地 8766 + Chrome 9222。
+每次 `git push main` 后 GitHub Actions 会自动跑五项：164 单测 + 静态检查 + 数据体检 + 首屏性能预算 + 浏览器冒烟 36 项（`.github/workflows/test.yml`，CI 里自起静态服务与无头 Chrome）；另有每日线上健康检查（`.github/workflows/health.yml`）。失败会在仓库 Actions 页提示。
 
 当前结果：
 

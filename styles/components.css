@@ -537,3 +537,15 @@ body.modal-open { overflow: hidden; }
 @media (max-width: 640px) {
   .scan-sort-inline { display: inline-flex; margin-left: auto; }
 }
+
+/* 卡片内操作区打磨：按钮统一右下对齐；长文本换行不撑破卡片 */
+@media (max-width: 640px) {
+  table.table.stack-on-mobile tr { padding: 10px 12px 12px; }
+  table.table.stack-on-mobile td { overflow-wrap: anywhere; }
+  table.table.stack-on-mobile td.ops,
+  table.table.stack-on-mobile td:has(> .btn:only-child) {
+    justify-content: flex-end; gap: 8px; padding-top: 6px;
+  }
+  table.table.stack-on-mobile td.ops::before,
+  table.table.stack-on-mobile td:has(> .btn:only-child)::before { content: none; }
+}
