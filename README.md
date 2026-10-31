@@ -119,7 +119,7 @@ src/engine/verdict.js           单股决策：亏损/支付率≥85%/现金流�
 ## 测试与体检
 
 ```bash
-node --test test/*.test.js     # 141 个用例（finance/portfolio/market/verdict/plan/建仓节奏/组合回测/个股回测/数据层/本地账本/格式化/联网解析）
+node --test test/*.test.js     # 153 个用例（finance/portfolio/market/verdict/plan/建仓节奏/组合回测/个股回测/数据层/本地账本/格式化/联网解析/差分测试）
 node tools/check-static.mjs    # 静态检查：index.html / sw.js SHELL / import / manifest / 数据文件引用
 node tools/smoke-all.mjs       # 浏览器全站冒烟：5 页 + 4 选股视图 + 3 我的视图 + 方案编辑/执行清单 + 深浅色 + 移动端（36 项）
 node tools/audit-app.mjs       # 数据覆盖/一致性/异常值 + 引擎自检
@@ -133,7 +133,7 @@ node tools/shot.js             # 界面截图 → ../report/design/
 
 当前结果：
 
-- 单测 **141/141**；
+- 单测 **153/153**（含对回测引擎的差分测试：独立朴素参考实现对照）；
 - 冒烟 **36/36**，0 console 报错；
 - 数据体检：全部通过（覆盖 / 时点 / 股息率分布 / 日 K 与行情一致性 / 未上市识别 / 引擎起点净值=本金）；
 - 加载性能（1280×1000，本地）：冷加载 107–329ms、热加载 57–176ms、首屏渲染 52–174ms；首屏 JS 319KB（ECharts 1MB 改为按需加载，仅个股/回测页首次进页加载）；核心数据 2.3MB，回测 9.5MB（月线 + 历史财报，按需）。

@@ -37,6 +37,21 @@ export function wan(v, d = 1) {
   return (v / 1e4).toFixed(d);
 }
 
+/** 金额拆成「数值 + 单位」：≥1 万亿用万亿、≥1 亿用亿，否则万（避免 1e12 元显示 9 位长串） */
+export function moneyParts(v) {
+  if (v == null || !isFinite(v)) return { v: '—', u: '' };
+  const a = Math.abs(v);
+  if (a >= 1e12) return { v: (v / 1e12).toFixed(2), u: '万亿' };
+  if (a >= 1e8) return { v: (v / 1e8).toFixed(2), u: '亿' };
+  return { v: (v / 1e4).toFixed(1), u: '万' };
+}
+
+/** 金额简写（含单位），适合文案/表格；需要分开字号时用 moneyParts */
+export function bigMoney(v) {
+  const p = moneyParts(v);
+  return p.u ? p.v + ' ' + p.u : p.v;
+}
+
 export function price(v) {
   if (v == null || !isFinite(v)) return '—';
   return v >= 100 ? v.toFixed(1) : v.toFixed(2);

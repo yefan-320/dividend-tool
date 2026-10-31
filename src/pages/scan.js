@@ -157,7 +157,7 @@ function table(rows, { showPct = true } = {}) {
     <td>${levelPill(r.level)}</td>
     <td class="ops">${watchBtn(r.code)}<button class="btn ghost sm" data-buy="${r.code}">买入</button></td>
   </tr>`).join('');
-  return `<div class="table-wrap table-tall"><table class="table scan-table">
+  return `<div class="table-wrap table-tall"><table class="table scan-table no-stack">
     <thead><tr>
       <th class="num">#</th><th>名称</th>
       ${sortTh('dy', '股息率')}${sortTh('consec', '连续分红')}${sortTh('pct', '分位')}${sortTh('cap', '市值(亿)')}
@@ -363,7 +363,7 @@ export function renderScanPage() {
       <h1 class="page-title">选股</h1>
       <div class="page-sub">全市场股息率扫描 · 条件筛选 · 多股对比 · 自选</div>
     </div>
-    <div class="page-actions">${icon('filter')}</div>
+    <div class="page-actions"><span class="page-mark" aria-hidden="true">${icon('filter')}</span></div>
   </div>
   ${searchBar()}
   ${viewTabs()}

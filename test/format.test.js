@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  esc, num, sign, pct, pctSign, money, wan, price, upDown, levelPill, dot, clamp, shortDate,
+  esc, num, sign, pct, pctSign, money, wan, moneyParts, bigMoney, price, upDown, levelPill, dot, clamp, shortDate,
 } from '../src/ui/format.js';
 
 test('esc：转义 HTML 危险字符，null/undefined 变空串', () => {
@@ -58,6 +58,18 @@ test('wan / price：万元与价格格式', () => {
   assert.equal(price(9.876), '9.88');
   assert.equal(price(123.45), '123.5'); // >=100 只保留 1 位
   assert.equal(price(null), '—');
+});
+
+test('moneyParts / bigMoney：万 / 亿 / 万亿 三档切换（防长数字串）', () => {
+  assert.deepEqual(moneyParts(613000), { v: '61.3', u: '万' });
+  assert.deepEqual(moneyParts(123456789), { v: '1.23', u: '亿' });
+  assert.deepEqual(moneyParts(-5e12), { v: '-5.00', u: '万亿' });
+  assert.deepEqual(moneyParts(null), { v: '—', u: '' });
+  assert.deepEqual(moneyParts(NaN), { v: '—', u: '' });
+  assert.equal(bigMoney(613000), '61.3 万');
+  assert.equal(bigMoney(1e12), '1.00 万亿');
+  assert.equal(bigMoney(-2.5e8), '-2.50 亿');
+  assert.equal(bigMoney(null), '—');
 });
 
 test('upDown：涨跌 class，0 与非法值为空串', () => {

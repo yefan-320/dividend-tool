@@ -20,7 +20,7 @@ import {
 } from '../charts.js';
 import { icon } from '../ui/icons.js';
 import { toast } from '../ui/toast.js';
-import { esc, num, pct, pctSign, upDown } from '../ui/format.js';
+import { esc, num, pct, pctSign, upDown, bigMoney } from '../ui/format.js';
 
 const todayStr = () => db.generated || '2026-10-30';
 const DAY = 86400000;
@@ -470,8 +470,6 @@ function renderPort(market, structureData) {
   ctx.nav = r.nav;
   const s = r.stats;
   const hasAdd = r.totalIn > capital;
-  const capW = capital / 10000;
-  const endW = r.end / 10000;
   const divEst = estimateAnnualDiv(structureData.holdings, series, dates[dates.length - 1], r.end);
   // 月支出必须 ≥100 元：旧版设置可能存了负数/0，不再静默兜成 1（会算出 65 万 % 这种荒谬结论）
   const expenseRaw = Number(loadSettings().expense);
@@ -495,13 +493,13 @@ function renderPort(market, structureData) {
   const sim = similarStates(market, structureData.holdings.map((h) => h.code), r.nav, from, to);
 
   const cards = [
-    { k: '总市值', v: endW.toFixed(0) + '万', s: `现金 ${(cashNow / 10000).toFixed(1)} 万 · 仓位 ${((1 - cashNow / (r.end || 1)) * 100).toFixed(0)}%`, key: 'nav', on: btState.metric === 'nav' },
-    { k: useReplay ? '起点市值' : '累计投入', v: (r.totalIn / 10000).toFixed(0) + '万', s: hasAdd ? `本金 ${capW.toFixed(0)} + 追加 ${((r.totalIn - capital) / 10000).toFixed(0)}` : (useReplay ? '当前股数 × 起点价 + 现金' : '起点本金') },
-    { k: '净赚金额', v: ((r.end - r.totalIn) / 10000).toFixed(0) + '万', cls: upDown(r.end - r.totalIn), s: `期末 ${endW.toFixed(0)} − 投入 ${(r.totalIn / 10000).toFixed(0)}` },
+    { k: '总市值', v: bigMoney(r.end), s: `现金 ${bigMoney(cashNow)} · 仓位 ${((1 - cashNow / (r.end || 1)) * 100).toFixed(0)}%`, key: 'nav', on: btState.metric === 'nav' },
+    { k: useReplay ? '起点市值' : '累计投入', v: bigMoney(r.totalIn), s: hasAdd ? `本金 ${bigMoney(capital)} + 追加 ${bigMoney(r.totalIn - capital)}` : (useReplay ? '当前股数 × 起点价 + 现金' : '起点本金') },
+    { k: '净赚金额', v: bigMoney(r.end - r.totalIn), cls: upDown(r.end - r.totalIn), s: `期末 ${bigMoney(r.end)} − 投入 ${bigMoney(r.totalIn)}` },
     { k: '年化', v: pctSign(s.cagr == null ? null : s.cagr * 100, 1), cls: vc, s: `${num(s.years, 1)} 年 · ${hasAdd ? 'XIRR' : '复利'}`, key: 'ann', on: btState.metric === 'ann' },
-    { k: '红利不复投', v: (r.endR / 10000).toFixed(0) + '万', s: `年化 ${pctSign(s.cagrR == null ? null : s.cagrR * 100, 1)}`, key: 'navR', on: btState.metric === 'navR' },
+    { k: '红利不复投', v: bigMoney(r.endR), s: `年化 ${pctSign(s.cagrR == null ? null : s.cagrR * 100, 1)}`, key: 'navR', on: btState.metric === 'navR' },
     { k: '最大回撤', v: pct(s.mdd * 100, 1), cls: 'down', s: `${esc(s.mddPeak)} → ${esc(s.mddTrough)}`, key: 'dd', on: btState.metric === 'dd' },
-    { k: '年分红(估)', v: (divEst / 10000).toFixed(1) + '万', s: '当前持仓 × 最新年度每股分红', key: 'div', on: btState.metric === 'div' },
+    { k: '年分红(估)', v: bigMoney(divEst), s: '当前持仓 × 最新年度每股分红', key: 'div', on: btState.metric === 'div' },
     { k: '月覆盖', v: expenseOk ? (cov > 999 ? '>999%' : cov.toFixed(0) + '%') : '—', s: expenseOk ? `年分红 ÷ 12 ÷ 月支出 ${expense.toLocaleString('zh-CN')}` : '月支出设置无效（需 100 元–1000 万/月），请到「我的 → 设置」修正', key: 'repay', on: btState.metric === 'repay' },
     { k: 'vs 指数', v: excess == null ? '—' : (excess >= 0 ? '+' : '') + excess.toFixed(1) + 'pp', cls: upDown(excess), s: 'vs 中证红利全收益 年化', key: 'hold', on: btState.metric === 'hold' },
   ];
@@ -511,12 +509,12 @@ function renderPort(market, structureData) {
   ${hero({
     kicker: `组合回测 · ${structureData.name || '当前持仓'} · ${useReplay ? '持仓回放（当前股数，假设自起点持有）' : '投入回测（本金按目标结构买入）'}${structureData.plan ? ' · ' + entryLabel(structureData.entry) : ''} · ${from} → ${to} · ${num(s.years, 1)} 年`,
     main: `组合 <b class="num gold">${retTxt}</b> <span class="thin">，年化 ${pctSign(s.cagr == null ? null : s.cagr * 100, 1)} · 基准 ${pctSign(s.benchCagr == null ? null : s.benchCagr * 100, 1)}</span>`,
-    desc: `期末 ${endW.toFixed(0)} 万（${useReplay ? '起点' : '投入'} ${(r.totalIn / 10000).toFixed(0)} 万）· 最大回撤 ${pct(s.mdd * 100, 1)}（基准 ${pct(s.benchMdd == null ? null : s.benchMdd * 100, 1)}）· 总分红 ${(totalDiv / 10000).toFixed(1)} 万 · ${structureData.plan ? '结构 = 方案「' + esc(structureData.name) + '」 · 建仓 = ' + esc(entryLabel(structureData.entry)) + ' · 现金 ' + structureData.cashPct.toFixed(0) + '%' : structureData.fallback ? '账本为空，按演示持仓等权' : '结构 = 当前组合市值权重（股票 ' + (100 - cashPctOf(structureData)).toFixed(0) + '% + 现金 ' + cashPctOf(structureData).toFixed(0) + '%）'}`,
+    desc: `期末 ${bigMoney(r.end)}（${useReplay ? '起点' : '投入'} ${bigMoney(r.totalIn)}）· 最大回撤 ${pct(s.mdd * 100, 1)}（基准 ${pct(s.benchMdd == null ? null : s.benchMdd * 100, 1)}）· 总分红 ${bigMoney(totalDiv)} · ${structureData.plan ? '结构 = 方案「' + esc(structureData.name) + '」 · 建仓 = ' + esc(entryLabel(structureData.entry)) + ' · 现金 ' + structureData.cashPct.toFixed(0) + '%' : structureData.fallback ? '账本为空，按演示持仓等权' : '结构 = 当前组合市值权重（股票 ' + (100 - cashPctOf(structureData)).toFixed(0) + '% + 现金 ' + cashPctOf(structureData).toFixed(0) + '%）'}`,
     stats: [
       { k: '累计收益', v: retTxt, cls: vc, s: hasAdd ? '扣追加资金' : '起点本金' },
       { k: '年化', v: pctSign(s.cagr == null ? null : s.cagr * 100, 1), cls: vc, s: hasAdd ? 'XIRR 资金加权' : '复利折算' },
       { k: '最大回撤', v: pct(s.mdd * 100, 1), cls: 'down', s: `基准 ${pct(s.benchMdd == null ? null : s.benchMdd * 100, 1)}` },
-      { k: '总分红', v: (totalDiv / 10000).toFixed(1) + '万', cls: 'gold', s: divCagr == null ? '—' : '增速 ' + pctSign(divCagr, 1) + '/年' },
+      { k: '总分红', v: bigMoney(totalDiv), cls: 'gold', s: divCagr == null ? '—' : '增速 ' + pctSign(divCagr, 1) + '/年' },
     ],
   })}
   ${(r.builds && r.builds.length) || (r.pending && r.pending.length) ? `<div class="bt-buildnote">${(r.builds || []).map((b) => `<div>🏗 <b>${esc(nameOf(b.code))}</b> ${esc(b.date)} 建仓 ${num(b.shares, 0)} 股 @ ${num(b.price, 2)}（初始份额 × 期间组合增长；建仓前份额摊给已上市持仓）</div>`).join('')}${(r.pending || []).map((p) => `<div>⏳ <b>${esc(nameOf(p.code))}</b> 期末仍未建仓：${esc(p.reason)}${p.weight ? '（目标 ' + num(p.weight, 1) + '%）' : ''}</div>`).join('')}</div>` : ''}
@@ -531,7 +529,7 @@ function renderPort(market, structureData) {
         <div><div class="k">累计收益</div><div class="v num ${vc}">${retTxt}</div></div>
         <div><div class="k">当前回撤</div><div class="v num">${pct(r.dd.at(-1)?.[1] ?? 0, 1)}</div></div>
         <div><div class="k">组合分位</div><div class="v num">${avgPct == null ? '—' : avgPct.toFixed(0) + '%'}</div></div>
-        <div><div class="k">历史分红</div><div class="v num gold">${(totalDiv / 10000).toFixed(1)}万</div></div>
+        <div><div class="k">历史分红</div><div class="v num gold">${bigMoney(totalDiv)}</div></div>
       </div>
       <div id="portChart" class="chart" style="height:560px"></div>
       <div class="bt-hint" style="padding:4px 4px 8px">主图：组合复投 / 红利不复投 / 两条全收益指数 · 中段：回撤 · 下段：年度分红柱 + 增速</div>
@@ -556,7 +554,7 @@ function renderPort(market, structureData) {
     </div>
   </section>
 
-  ${fold('divhist', '分红（组合现金流）', `总分红 <b class="num gold">${(totalDiv / 10000).toFixed(1)}万</b> · 年均 ${(totalDiv / 10000 / Math.max(1, yearly.length)).toFixed(2)}万 · 增速 ${divCagr == null ? '—' : pctSign(divCagr, 1) + '/年'} · 分红率 ${pct((totalDiv / Math.max(1, r.totalIn)) * 100, 1)} · 回本 ${pct((totalDiv / Math.max(1, capital)) * 100, 0)}`, '<div id="divHist" class="chart" style="height:280px"></div>')}
+  ${fold('divhist', '分红（组合现金流）', `总分红 <b class="num gold">${bigMoney(totalDiv)}</b> · 年均 ${bigMoney(totalDiv / Math.max(1, yearly.length))} · 增速 ${divCagr == null ? '—' : pctSign(divCagr, 1) + '/年'} · 分红率 ${pct((totalDiv / Math.max(1, r.totalIn)) * 100, 1)} · 回本 ${pct((totalDiv / Math.max(1, capital)) * 100, 0)}`, '<div id="divHist" class="chart" style="height:280px"></div>')}
 
   <section class="panel fade-in" style="margin-top:14px">
     <div class="panel-head"><span class="panel-title">钱从哪来：收益拆解</span><span class="section-note">本金 → 分红 → 价格 → 期末</span></div>
@@ -616,23 +614,23 @@ function renderStockPage(market, structureData) {
     <div class="stock-search" style="max-width:220px"><input id="stSearch" placeholder="输入 6 位代码" maxlength="6" value="${esc(code)}"></div>
   </div>
   ${hero({
-    kicker: `个股回测 · ${esc(nameOf(code))} ${esc(code)} · ${clampFrom(btState.from)} → ${btState.to} · 本金 ${(btState.capital / 10000).toFixed(0)}万`,
-    main: `年化 <b class="num gold">${pctSign(st.cagr == null ? null : st.cagr * 100, 1)}</b> <span class="thin">，期末 ${(r.end / 10000).toFixed(0)}万 · 买入持有 ${pctSign(st.cagrHold == null ? null : st.cagrHold * 100, 1)}</span>`,
-    desc: `买点 ${st.buys} 次 · 卖点 ${st.sells} 次 · 分红 ${(r.totalDiv / 10000).toFixed(1)} 万 · 最大回撤 ${pct(st.mdd * 100, 1)} · vs 中证红利全收益 ${pctSign(st.excess == null ? null : st.excess * 100, 1)}/年`,
+    kicker: `个股回测 · ${esc(nameOf(code))} ${esc(code)} · ${clampFrom(btState.from)} → ${btState.to} · 本金 ${bigMoney(btState.capital)}`,
+    main: `年化 <b class="num gold">${pctSign(st.cagr == null ? null : st.cagr * 100, 1)}</b> <span class="thin">，期末 ${bigMoney(r.end)} · 买入持有 ${pctSign(st.cagrHold == null ? null : st.cagrHold * 100, 1)}</span>`,
+    desc: `买点 ${st.buys} 次 · 卖点 ${st.sells} 次 · 分红 ${bigMoney(r.totalDiv)} · 最大回撤 ${pct(st.mdd * 100, 1)} · vs 中证红利全收益 ${pctSign(st.excess == null ? null : st.excess * 100, 1)}/年`,
     stats: [
       { k: '累计收益', v: pctSign(st.ret * 100, 1), cls: vc, s: `${num(st.years, 1)} 年` },
       { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: btState.monthlyAdd > 0 ? 'XIRR 资金加权' : '复利折算' },
       { k: '最大回撤', v: pct(st.mdd * 100, 1), cls: 'down', s: `${esc(st.mddPeak)} → ${esc(st.mddTrough)}` },
-      { k: '分红', v: (r.totalDiv / 10000).toFixed(1) + '万', cls: 'gold', s: `年化股息 ${pct((r.totalDiv / Math.max(1, st.years) / btState.capital) * 100, 1)}` },
+      { k: '分红', v: bigMoney(r.totalDiv), cls: 'gold', s: `年化股息 ${pct((r.totalDiv / Math.max(1, st.years) / btState.capital) * 100, 1)}` },
     ],
   })}
 
   ${metricGrid([
-    { k: '期末', v: (r.end / 10000).toFixed(0) + '万', s: '现金 + 持仓', key: 'nav', on: true },
+    { k: '期末', v: bigMoney(r.end), s: '现金 + 持仓', key: 'nav', on: true },
     { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: 'XIRR / 复利', key: 'ann' },
     { k: '最大回撤', v: pct(st.mdd * 100, 1), cls: 'down', s: `${esc(st.mddPeak)} → ${esc(st.mddTrough)}`, key: 'dd' },
-    { k: '分红', v: (r.totalDiv / 10000).toFixed(1) + '万', cls: 'gold', s: '累计到账', key: 'div' },
-    { k: '买入持有', v: (r.endHold / 10000).toFixed(0) + '万', s: `年化 ${pctSign(st.cagrHold == null ? null : st.cagrHold * 100, 1)}`, key: 'hold' },
+    { k: '分红', v: bigMoney(r.totalDiv), cls: 'gold', s: '累计到账', key: 'div' },
+    { k: '买入持有', v: bigMoney(r.endHold), s: `年化 ${pctSign(st.cagrHold == null ? null : st.cagrHold * 100, 1)}`, key: 'hold' },
     { k: 'vs 指数', v: pctSign(st.excess == null ? null : st.excess * 100, 1), cls: upDown(st.excess), s: 'vs 中证红利全收益', key: 'bench' },
   ])}
   <div id="metricDetail" style="margin-top:12px"></div>
@@ -667,7 +665,6 @@ function renderCompare(market, structureData) {
   const rows = ctx.compareRows || [];
   const bench = ctx.compareBench;
   const lowVol = ctx.compareLowVol;
-  const capW = btState.capital / 10000;
   const benchCagr = bench ? bench.cagr : null;
   const best = rows.length ? [...rows].sort((a, b) => b.end - a.end)[0] : null;
   const safest = rows.length ? [...rows].sort((a, b) => b.mdd - a.mdd)[0] : null;
@@ -675,10 +672,10 @@ function renderCompare(market, structureData) {
     const excess = benchCagr != null && x.cagr != null ? (x.cagr - benchCagr) * 100 : null;
     return `<tr>
       <td class="name"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${x.color};margin-right:6px"></span>${esc(x.name)}</td>
-      <td class="num">${(x.end / 10000).toFixed(0)}万</td>
+      <td class="num">${bigMoney(x.end)}</td>
       <td class="num ${upDown(x.cagr)}">${pctSign(x.cagr == null ? null : x.cagr * 100, 1)}</td>
       <td class="num down">${pct(x.mdd * 100, 0)}</td>
-      <td class="num">${x.div == null ? '—' : (x.div / 10000).toFixed(1) + '万'}</td>
+      <td class="num">${x.div == null ? '—' : bigMoney(x.div)}</td>
       <td class="num ${upDown(excess)}">${excess == null ? '—' : (excess >= 0 ? '+' : '') + excess.toFixed(1) + 'pp'}</td>
       <td class="num">${winYears(x.nav, bench?.rows)}</td>
     </tr>`;
@@ -686,7 +683,7 @@ function renderCompare(market, structureData) {
   return `
   ${paramBar({ tabs: false })}
   <section class="panel fade-in">
-    <div class="panel-head"><span class="panel-title">组合对比</span><span class="section-note">同一本金 ${capW.toFixed(0)} 万 · 同一区间 · 同一口径</span></div>
+    <div class="panel-head"><span class="panel-title">组合对比</span><span class="section-note">同一本金 ${bigMoney(btState.capital)} · 同一区间 · 同一口径</span></div>
     <div class="panel-body" style="padding:10px 10px 4px">
       <div id="cmpChart" class="chart" style="height:380px"></div>
       <div class="bt-hint" style="padding:4px">每个方案按自己的目标权重复投；红利策略为每年 4 月按股息率选前 20 只等权调仓；指数为全收益口径</div>
@@ -702,9 +699,9 @@ function renderCompare(market, structureData) {
   <section class="panel fade-in" style="margin-top:14px">
     <div class="panel-head"><span class="panel-title">结论</span></div>
     <div class="panel-body" style="font-size:12.5px;line-height:1.8;color:var(--text-2)">
-      ${best ? `历史最赚：<b class="gold">${esc(best.name)}</b>（${(best.end / 10000).toFixed(0)}万）·` : ''}
+      ${best ? `历史最赚：<b class="gold">${esc(best.name)}</b>（${bigMoney(best.end)}）·` : ''}
       ${safest ? `最抗跌：<b class="down">${esc(safest.name)}</b>（回撤 ${pct(safest.mdd * 100, 0)}）·` : ''}
-      红利全收益：${bench ? (bench.end / 10000).toFixed(0) + '万（' + pctSign(bench.cagr * 100, 1) + '/年）' : '—'}<br>
+      红利全收益：${bench ? bigMoney(bench.end) + '（' + pctSign(bench.cagr * 100, 1) + '/年）' : '—'}<br>
       组合结构与选股规则的差异，就是这张表要回答的问题：谁在牛市更赚、谁在熊市更抗跌、分红谁更多。
     </div>
   </section>`;

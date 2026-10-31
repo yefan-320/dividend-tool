@@ -5,7 +5,7 @@ import {
 } from '../store.js';
 import { plansView, bindPlans } from './plans.js';
 import { icon } from '../ui/icons.js';
-import { esc, num, money, wan, pct, pctSign, upDown } from '../ui/format.js';
+import { esc, num, money, wan, moneyParts, bigMoney, pct, pctSign, upDown } from '../ui/format.js';
 import { toast } from '../ui/toast.js';
 import { confirmDialog } from '../ui/modal.js';
 
@@ -33,8 +33,8 @@ function hero(r, cash) {
   return `<section class="hero fade-in">
     <div class="account-hero">
       <div class="hero-kicker">我的组合 · ${r.lots.length} 笔买入 · ${new Set(r.lots.map((x) => x.code)).size} 只股票</div>
-      <div class="account-total num">${wan(total, 1)}<small> 万</small></div>
-      <div class="hero-desc">持仓 ${wan(r.totalValue, 1)} 万 · 现金 ${wan(cash, 1)} 万 · 仓位 ${pos.toFixed(0)}% · 年分红 ${wan(annualDiv, 1)} 万</div>
+      <div class="account-total num">${moneyParts(total).v}<small> ${moneyParts(total).u}</small></div>
+      <div class="hero-desc">持仓 ${bigMoney(r.totalValue)} · 现金 ${bigMoney(cash)} · 仓位 ${pos.toFixed(0)}% · 年分红 ${bigMoney(annualDiv)}</div>
     </div>
     <div class="stats">
       <div class="stat"><div class="stat-label">总盈亏</div><div class="stat-value sm num ${upDown(pnl)}">${signedMoney(pnl)}</div><div class="stat-sub">含已实现 ${signedMoney(r.realizedPnl)}</div></div>

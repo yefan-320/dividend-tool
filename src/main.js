@@ -4,6 +4,7 @@ import { renderScanPage, bindScan } from './pages/scan.js';
 import { renderBacktest, bindBacktest, setBacktestRerender } from './pages/backtest.js';
 import { renderMine, bindMine } from './pages/mine.js';
 import { icon } from './ui/icons.js';
+import { applyTableLayout, refreshTableHints } from './ui/table.js';
 import { loadCore, db, applyQuoteCache, refreshQuotes } from './data.js';
 import { loadSettings } from './store.js';
 import { toast } from './ui/toast.js';
@@ -103,6 +104,7 @@ async function renderPage() {
     if (token !== renderToken) { clearTimeout(loadingTimer); return; }
     clearTimeout(loadingTimer);
     app.innerHTML = html;
+    try { applyTableLayout(app); } catch (e) { console.error('[表格布局]', e); }
   } catch (e) {
     clearTimeout(loadingTimer);
     if (token !== renderToken) return;
@@ -143,6 +145,7 @@ window.addEventListener('resize', () => {
     const ch = window.echarts?.getInstanceByDom(el);
     if (ch) ch.resize();
   });
+  refreshTableHints();
 });
 
 window.__rerender = renderPage;

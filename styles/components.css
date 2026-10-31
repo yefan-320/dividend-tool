@@ -460,3 +460,70 @@ body.modal-open { overflow: hidden; }
 .chip.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-2); font-weight: 600; }
 .empty-block { padding: 40px 16px; text-align: center; color: var(--text-3); font-size: 12.5px; line-height: 1.8; border: 1px dashed var(--line-strong); border-radius: var(--r-lg); background: var(--surface); }
 .banner code { font-family: var(--mono); font-size: 10.5px; }
+
+/* ---------- 窄屏数据表：宽表自动卡片化（src/ui/table.js 打标） ---------- */
+@media (max-width: 640px) {
+  .table-wrap { -webkit-overflow-scrolling: touch; }
+
+  table.table.stack-on-mobile { width: 100%; }
+  table.table.stack-on-mobile thead { display: none; }
+  table.table.stack-on-mobile tbody { display: block; }
+  table.table.stack-on-mobile tr { display: flex; flex-direction: column; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  table.table.stack-on-mobile tbody tr:last-child { border-bottom: 0; }
+  table.table.stack-on-mobile tr:hover { background: transparent; }
+  table.table.stack-on-mobile td {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    width: auto; padding: 2.5px 0; border: 0; text-align: right; white-space: normal;
+  }
+  table.table.stack-on-mobile td::before {
+    content: attr(data-label); flex: 0 0 auto; text-align: left;
+    color: var(--text-3); font-size: 10.5px; font-weight: 500;
+  }
+  table.table.stack-on-mobile td.name {
+    order: -1; justify-content: flex-start; gap: 8px; padding: 0 0 5px; font-size: 13.5px;
+  }
+  table.table.stack-on-mobile td.name::before { content: none; }
+  table.table.stack-on-mobile td.name .code { margin-left: auto; }
+  table.table.stack-on-mobile td.ops {
+    justify-content: flex-end; gap: 8px; padding-top: 8px;
+  }
+  table.table.stack-on-mobile td.ops::before { content: none; }
+  table.table.stack-on-mobile td:empty { display: none; }
+  table.table.stack-on-mobile .empty-cell {
+    display: block; text-align: center; padding: 18px 4px; color: var(--text-3); font-size: 12px;
+  }
+  table.table.stack-on-mobile .empty-cell::before { content: none; }
+  /* 收益条在卡片里别撑宽 */
+  table.table.stack-on-mobile .ret-bar { max-width: 90px; }
+
+  /* 仍然横向滚动的宽表：首列吸顶 + 滑动提示 */
+  .table-wrap.scroll-hint { position: relative; }
+  .table-wrap.scroll-hint::before {
+    content: '← 左右滑动，查看全部列 →';
+    display: block; padding: 2px 2px 7px; font-size: 10.5px; color: var(--text-3);
+  }
+  .table-wrap.scroll-hint .table th:first-child,
+  .table-wrap.scroll-hint .table td:first-child {
+    position: sticky; left: 0; z-index: 1; background: var(--surface);
+  }
+  .table-wrap.scroll-hint .table th:first-child { background: var(--surface-2); }
+
+  /* 扫描榜：手机上隐藏次要列，名称/股息率/连续分红/结论/操作 一屏可见 */
+  .scan-table th:nth-child(1), .scan-table td:nth-child(1),
+  .scan-table th:nth-child(5), .scan-table td:nth-child(5),
+  .scan-table th:nth-child(6), .scan-table td:nth-child(6),
+  .scan-table th:nth-child(7), .scan-table td:nth-child(7),
+  .scan-table th:nth-child(8), .scan-table td:nth-child(8) { display: none; }
+  .scan-table th, .scan-table td { padding: 8px 7px; font-size: 11.5px; }
+  .scan-table td.name { max-width: 74px; overflow: hidden; text-overflow: ellipsis; }
+  .scan-table td.name .code { display: none; }
+  .scan-table th:nth-child(2), .scan-table td:nth-child(2) {
+    position: sticky; left: 0; z-index: 1; background: var(--surface);
+  }
+  .scan-table th:nth-child(2) { background: var(--surface-2); }
+  .scan-table .ops .btn { height: 26px; padding: 0 6px; }
+}
+
+/* page-head 右侧的装饰性小图标（如选股页筛选标记）：限制尺寸，避免裸 svg 在窄屏被拉成 300px */
+.page-mark { display: inline-flex; align-items: center; color: var(--text-3); }
+.page-mark svg { width: 16px; height: 16px; }

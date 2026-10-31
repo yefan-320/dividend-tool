@@ -3,7 +3,7 @@ import { db, quote, nameOf, divSummary, dataMeta } from '../data.js';
 import { evaluate } from '../engine/verdict.js';
 import { loadTxs, loadCash } from '../store.js';
 import { icon } from '../ui/icons.js';
-import { esc, num, money, wan, pctSign, upDown, levelPill, dot } from '../ui/format.js';
+import { esc, num, money, wan, moneyParts, bigMoney, pctSign, upDown, levelPill, dot } from '../ui/format.js';
 
 const LV = { buy: '可买', wait: '观察', avoid: '回避', hold: '持有', missing: '数据不足' };
 
@@ -72,10 +72,10 @@ function hero(cands, p) {
       <div class="hero-desc">亏损、支付率 ≥85%、经营现金流覆盖不足、股息率异常（&gt;15%）的直接回避——股息率再高也不买。只有财务健康、股息率 ≥5%、连续分红 ≥5 年的才给「可买」。</div>
     </div>
     <div class="stats">
-      <div class="stat"><div class="stat-label">总资产</div><div class="stat-value num">${wan(total, 1)}<span style="font-size:13px;color:var(--text-2);font-weight:500"> 万</span></div><div class="stat-sub">现金 ${wan(cash, 1)} 万</div></div>
-      <div class="stat"><div class="stat-label">仓位</div><div class="stat-value num">${total > 0 ? Math.round(r.totalValue / total * 100) : 0}<span style="font-size:13px;color:var(--text-2);font-weight:500">%</span></div><div class="stat-sub">股票 ${wan(r.totalValue, 1)} 万</div></div>
-      <div class="stat"><div class="stat-label">累计收益率</div><div class="stat-value num ${upDown(pnl)}">${pctSign(r.totalCost > 0 ? (pnl / r.totalCost) * 100 : null, 1)}</div><div class="stat-sub">盈亏 ${wan(pnl, 1)} 万</div></div>
-      <div class="stat"><div class="stat-label">组合 XIRR</div><div class="stat-value num gold">${pctSign(r.xirr == null ? null : r.xirr * 100, 1)}</div><div class="stat-sub">年分红 ${wan(annualDiv, 1)} 万</div></div>
+      <div class="stat"><div class="stat-label">总资产</div><div class="stat-value num">${moneyParts(total).v}<span style="font-size:13px;color:var(--text-2);font-weight:500"> ${moneyParts(total).u}</span></div><div class="stat-sub">现金 ${bigMoney(cash)}</div></div>
+      <div class="stat"><div class="stat-label">仓位</div><div class="stat-value num">${total > 0 ? Math.round(r.totalValue / total * 100) : 0}<span style="font-size:13px;color:var(--text-2);font-weight:500">%</span></div><div class="stat-sub">股票 ${bigMoney(r.totalValue)}</div></div>
+      <div class="stat"><div class="stat-label">累计收益率</div><div class="stat-value num ${upDown(pnl)}">${pctSign(r.totalCost > 0 ? (pnl / r.totalCost) * 100 : null, 1)}</div><div class="stat-sub">盈亏 ${bigMoney(pnl)}</div></div>
+      <div class="stat"><div class="stat-label">组合 XIRR</div><div class="stat-value num gold">${pctSign(r.xirr == null ? null : r.xirr * 100, 1)}</div><div class="stat-sub">年分红 ${bigMoney(annualDiv)}</div></div>
     </div>
   </section>`;
 }

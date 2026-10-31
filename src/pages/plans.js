@@ -326,7 +326,7 @@ function detailTable(act, plan) {
   }).join('');
 
   return `<div class="table-wrap plan-exec-wrap">
-    <table class="table plan-exec-table">
+    <table class="table plan-exec-table no-stack">
       <thead><tr>
         <th>股票</th><th>目标权重</th><th>目标(万)</th><th>现价</th><th>持股</th><th>当前(万)</th><th>差额(万)</th><th>建议</th><th>股息率</th>${isDip ? '<th>买点</th>' : ''}<th></th>
       </tr></thead>
