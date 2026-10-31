@@ -1,6 +1,6 @@
 # 红利工具
 
-> 线上版（手机可直接打开，不依赖本机服务）：**https://yefan-320.github.io/dividend-tool-v3/**
+> 线上版（手机可直接打开，不依赖本机服务）：**https://yefan-320.github.io/dividend-tool/**
 
 本地离线的 A 股红利工具：全市场股息率扫描、个股决策、组合回测（组合 / 个股 / 对比）、持仓账本。纯静态站点，无构建、无后端，所有数据在本地。
 
@@ -30,7 +30,7 @@ python3 -m http.server 8766
 
 ## 手机访问
 
-**已部署：`https://yefan-320.github.io/dividend-tool-v3/`（GitHub Pages，手机直接打开，不依赖 Mac / 本机服务）**
+**已部署：`https://yefan-320.github.io/dividend-tool/`（GitHub Pages，手机直接打开，不依赖 Mac / 本机服务）**
 
 更新线上版本（**不需要再授权**）：
 
