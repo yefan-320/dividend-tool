@@ -1,0 +1,17 @@
+{
+  "name": "dividend-tool",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "smoke": "node tools/smoke-all.mjs",
+    "shot": "node tools/shot.js",
+    "perf": "node tools/perf.mjs",
+    "audit": "node tools/audit-app.mjs",
+    "fetch": "node tools/fetch-data.mjs all",
+    "fetch:daily": "node tools/fetch-daily.mjs",
+    "fetch:finance": "node tools/fetch-finance.mjs 2011 2025",
+    "derivatives": "node tools/build-derivatives.mjs"
+  }
+}

@@ -1,0 +1,273 @@
+/**
+ * 回测引擎（纯函数，无 DOM）。
+ *
+ * 计划模式：每年 4 月最后一个交易日，用「上一年度每股分红 / 4 月收盘价」算股息率，
+ * 过滤后取股息率最高的 N 只等权买入，持有到次年 4 月调仓。
+ *
+ * 约定：
+ *  - 价格用不复权月末收盘（data/monthly.json）
+ *  - 分红用年度每股分红（data/baseline.json dividends），持有期按 12 个月均摊
+ *  - 交易成本按换手率双边计
+ *  - 基准为指数月末收盘（data/benchmark.json）
+ */
+
+const YM = (y, m) => `${y}-${String(m).padStart(2, '0')}`;
+
+export function toPriceIndex(months) {
+  const out = new Map();
+  for (const [code, rows] of Object.entries(months)) {
+    out.set(code, new Map(rows));
+  }
+  return out;
+}
+
+function isST(name = '') {
+  return /ST|退/.test(name);
+}
+
+/** 某年某月的价格 */
+export function priceAt(prices, code, ym) {
+  return prices.get(code)?.get(ym) ?? null;
+}
+
+/** code 在 ym 之前是否有至少 n 个月的价格数据（上市满 n 个月） */
+function hasHistory(prices, code, ym, n = 24) {
+  const m = prices.get(code);
+  if (!m) return false;
+  let c = 0;
+  for (const k of m.keys()) if (k < ym) c++;
+  return c >= n;
+}
+
+/** 上一年度每股分红 */
+function dpsPrevYear(divs, code, year) {
+  return divs[code]?.years?.[year - 1] ?? null;
+}
+
+/** 连续分红年数（截至 year-1，向前数） */
+function consecutiveDivYears(divs, code, year) {
+  const years = divs[code]?.years || {};
+  let n = 0;
+  for (let y = year - 1; y >= year - 30; y--) {
+    if (years[y] > 0) n++;
+    else break;
+  }
+  return n;
+}
+
+/**
+ * 选股：给定调仓年月，返回按股息率降序的候选。
+ * 返回 [{code, name, dy, price, dps}]
+ */
+export function selectCandidates({ baseline, prices, ym, year, params, finHistory }) {
+  const { pool, dividends } = baseline;
+  const useQuality = params.quality !== false && !!finHistory;
+  const out = [];
+  for (const code of Object.keys(pool)) {
+    const info = pool[code];
+    if (!info) continue;
+    if (isST(info.n)) continue;
+    const price = priceAt(prices, code, ym);
+    if (!price || price <= 0) continue;
+    if (!hasHistory(prices, code, ym, params.minHistoryMonths ?? 24)) continue;
+    const dps = dpsPrevYear(dividends, code, year);
+    if (!(dps > 0)) continue;
+    if (consecutiveDivYears(dividends, code, year) < (params.minDivYears ?? 3)) continue;
+    const dy = (dps / price) * 100;
+    if (dy < (params.minDy ?? 4)) continue;
+    if (dy > 15) continue; // 异常股息率不选
+    if (useQuality) {
+      const rows = finHistory[code] || [];
+      const fin = rows.find((r) => r[0] === year - 1);
+      if (!fin) continue;
+      const [, eps, roe, , , ocfps] = fin;
+      if (!(eps > 0)) continue;
+      const payout = (dps / eps) * 100;
+      if (payout >= 85) continue;
+      const cover = ocfps / eps;
+      if (cover < 0.7) continue;
+      if (roe != null && roe < 5) continue;
+    }
+    out.push({ code, name: info.n, dy, price, dps });
+  }
+  out.sort((a, b) => b.dy - a.dy);
+  return out;
+}
+
+/** 等权或股息率加权 */
+function weightsFor(list, mode) {
+  if (mode === 'dy') {
+    const sum = list.reduce((s, x) => s + x.dy, 0);
+    return list.map((x) => x.dy / sum);
+  }
+  const w = 1 / list.length;
+  return list.map(() => w);
+}
+
+/**
+ * 运行计划回测。
+ * @param {object} opts
+ * @param {object} opts.baseline {pool, dividends}
+ * @param {object} opts.months   {code: [[ym, close]]}
+ * @param {object} opts.benchmark {ym: value}
+ * @param {object} opts.params  {startYear, endYm, holdN, minDy, minDivYears, weight, cost}
+ */
+export function runPlanBacktest({ baseline, months, benchmark = {}, params = {}, finHistory = null }) {
+  const p = {
+    startYear: 2013,
+    endYm: '2026-10',
+    holdN: 20,
+    minDy: 4,
+    minDivYears: 3,
+    weight: 'equal',
+    cost: 0.001,
+    ...params,
+  };
+  const prices = toPriceIndex(months);
+  const rebalanceYm = (y) => YM(y, 4);
+
+  // 预计算每月末列表
+  const monthList = [];
+  for (let y = p.startYear; y <= Number(p.endYm.slice(0, 4)); y++) {
+    const endM = y === Number(p.endYm.slice(0, 4)) ? Number(p.endYm.slice(5, 7)) : 12;
+    for (let m = 1; m <= endM; m++) monthList.push(YM(y, m));
+  }
+
+  let nav = 1;
+  const navSeries = [];
+  const periods = [];
+  const trades = [];
+  let current = null; // {ym, items:[{code, weight, dps, price}], year}
+  let prevNav = 1;
+  let totalTurnover = 0;
+
+  for (let i = 0; i < monthList.length; i++) {
+    const ym = monthList[i];
+    const y = Number(ym.slice(0, 4));
+    const m = Number(ym.slice(5, 7));
+
+    // 调仓：每年 4 月
+    if (m === 4 && y >= p.startYear) {
+      const cand = selectCandidates({ baseline, prices, ym, year: y, params: p, finHistory });
+      const picked = cand.slice(0, p.holdN);
+      const ws = weightsFor(picked, p.weight);
+      const items = picked.map((x, j) => ({ code: x.code, name: x.name, weight: ws[j], dy: x.dy, dps: x.dps, price: x.price }));
+
+      if (current) {
+        const oldMap = new Map(current.items.map((x) => [x.code, x.weight]));
+        const newMap = new Map(items.map((x) => [x.code, x.weight]));
+        let turnover = 0;
+        for (const [c, w] of oldMap) turnover += Math.max(0, w - (newMap.get(c) || 0));
+        for (const [c, w] of newMap) turnover += Math.max(0, w - (oldMap.get(c) || 0));
+        turnover = turnover / 2; // 单边换手
+        totalTurnover += turnover;
+        nav *= 1 - turnover * p.cost * 2;
+        trades.push({ ym, turnover, sold: current.items.filter((x) => !newMap.has(x.code)).map((x) => x.code), bought: items.filter((x) => !oldMap.has(x.code)).map((x) => x.code) });
+      } else {
+        nav *= 1 - p.cost; // 建仓
+        totalTurnover += 1;
+      }
+      current = { ym, year: y, items };
+      periods.push({ ym, items: items.map((x) => ({ code: x.code, name: x.name, dy: x.dy })) });
+    }
+
+    // 月收益：价格变动 + 分红均摊
+    if (current && i > 0) {
+      const prevYm = monthList[i - 1];
+      let ret = 0;
+      let hit = 0;
+      for (const it of current.items) {
+        const p0 = priceAt(prices, it.code, prevYm);
+        const p1 = priceAt(prices, it.code, ym);
+        if (!p0 || !p1) continue;
+        hit++;
+        const priceRet = p1 / p0 - 1;
+        const dps = dpsPrevYear(baseline.dividends, it.code, current.year);
+        const divRet = dps > 0 ? dps / p0 / 12 : 0;
+        ret += it.weight * (priceRet + divRet);
+      }
+      // 有成分股停牌/缺数据时，按命中权重归一，避免凭空损失
+      if (hit > 0) {
+        const wsum = current.items.reduce((s, it) => s + (priceAt(prices, it.code, ym) && priceAt(prices, it.code, prevYm) ? it.weight : 0), 0);
+        if (wsum > 0 && wsum < 0.999) ret = ret / wsum;
+      }
+      prevNav = nav;
+      nav *= 1 + ret;
+    }
+
+    navSeries.push({ ym, nav });
+    if (current && m === 12) {
+      const yearStartIdx = navSeries.findIndex((x) => x.ym === YM(y - 1, 12));
+      if (yearStartIdx >= 0) {
+        // 留待 yearly 汇总
+      }
+    }
+  }
+
+  // 年度收益
+  const yearly = [];
+  for (let y = p.startYear; y <= Number(p.endYm.slice(0, 4)); y++) {
+    const a = y === p.startYear ? 1 : navSeries.find((x) => x.ym === YM(y - 1, 12))?.nav;
+    const b = navSeries.find((x) => x.ym === YM(y, 12))?.nav ?? navSeries[navSeries.length - 1].nav;
+    if (a && b) yearly.push({ year: y, ret: b / a - 1 });
+  }
+
+  const total = nav - 1;
+  const monthsCount = navSeries.length - 1;
+  const yearsCount = monthsCount / 12;
+  const cagr = yearsCount > 0 ? Math.pow(nav, 1 / yearsCount) - 1 : null;
+
+  // 最大回撤
+  let peak = navSeries[0]?.nav ?? 1, peakYm = navSeries[0]?.ym ?? '';
+  let mdd = 0, mddPeak = '', mddTrough = '';
+  for (const pt of navSeries) {
+    if (pt.nav > peak) { peak = pt.nav; peakYm = pt.ym; }
+    const dd = pt.nav / peak - 1;
+    if (dd < mdd) { mdd = dd; mddPeak = peakYm; mddTrough = pt.ym; }
+  }
+
+  // 月度收益序列 -> 夏普
+  const rets = [];
+  for (let i = 1; i < navSeries.length; i++) rets.push(navSeries[i].nav / navSeries[i - 1].nav - 1);
+  const mean = rets.reduce((s, x) => s + x, 0) / (rets.length || 1);
+  const sd = Math.sqrt(rets.reduce((s, x) => s + (x - mean) ** 2, 0) / Math.max(1, rets.length - 1));
+  const sharpe = sd > 0 ? ((mean * 12 - 0.02) / (sd * Math.sqrt(12))) : null;
+
+  // 基准
+  const benchSeries = [];
+  for (const pt of navSeries) {
+    const v = benchmark[pt.ym];
+    if (Number.isFinite(v)) benchSeries.push({ ym: pt.ym, v });
+  }
+  let benchTotal = null, benchCagr = null, benchMdd = null;
+  if (benchSeries.length > 1) {
+    benchTotal = benchSeries[benchSeries.length - 1].v / benchSeries[0].v - 1;
+    benchCagr = Math.pow(1 + benchTotal, 12 / (benchSeries.length - 1)) - 1;
+    let bp = benchSeries[0].v, bmdd = 0;
+    for (const x of benchSeries) { bp = Math.max(bp, x.v); bmdd = Math.min(bmdd, x.v / bp - 1); }
+    benchMdd = bmdd;
+  }
+
+  return {
+    nav: navSeries,
+    yearly,
+    periods,
+    trades,
+    benchmark: benchSeries,
+    stats: {
+      total,
+      cagr,
+      mdd,
+      mddPeak,
+      mddTrough,
+      sharpe,
+      turnover: totalTurnover / Math.max(1, periods.length),
+      years: yearsCount,
+      benchTotal,
+      benchCagr,
+      benchMdd,
+      excess: benchTotal != null ? total - benchTotal : null,
+    },
+    params: p,
+  };
+}
