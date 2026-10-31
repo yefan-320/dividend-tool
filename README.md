@@ -133,7 +133,7 @@ node tools/shot.js             # 界面截图 → ../report/design/
 ```
 
 `npm run verify` = 单测 + 静态检查 + 数据体检（不需要浏览器）；`npm run smoke` / `npm run perf` 需要本地 8766 + Chrome 9222。
-每次 `git push main` 后 GitHub Actions 会自动跑同样三项（`.github/workflows/test.yml`），失败会在仓库 Actions 页提示。
+每次 `git push main` 后 GitHub Actions 会自动跑四项：164 单测 + 静态检查 + 数据体检 + 浏览器冒烟 36 项（`.github/workflows/test.yml`，CI 里自起静态服务与无头 Chrome），失败会在仓库 Actions 页提示。
 
 当前结果：
 
