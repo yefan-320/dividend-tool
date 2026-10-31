@@ -5,6 +5,7 @@ import { renderBacktest, bindBacktest, setBacktestRerender } from './pages/backt
 import { renderMine, bindMine } from './pages/mine.js';
 import { icon } from './ui/icons.js';
 import { loadCore, db, applyQuoteCache, refreshQuotes } from './data.js';
+import { loadSettings } from './store.js';
 import { toast } from './ui/toast.js';
 import { closeModal } from './ui/modal.js';
 
@@ -85,23 +86,30 @@ function skeleton() {
   </div>`;
 }
 
+let renderToken = 0;
+
 async function renderPage() {
+  // 快速切换 tab 时，上一次异步 render 可能后返回；用 token 丢弃过期结果，避免旧页面覆盖新页面
+  const token = ++renderToken;
   closeModal();
   const id = currentId();
   const page = PAGES.find((p) => p.id === id) || PAGES[0];
   document.title = `${page.label} · 红利工具`;
   renderSidebar(page.id);
   renderTabbar(page.id);
-  const loadingTimer = setTimeout(() => { app.innerHTML = skeleton(); }, 120);
+  const loadingTimer = setTimeout(() => { if (token === renderToken) app.innerHTML = skeleton(); }, 120);
   try {
     const html = await page.render();
+    if (token !== renderToken) { clearTimeout(loadingTimer); return; }
     clearTimeout(loadingTimer);
     app.innerHTML = html;
   } catch (e) {
     clearTimeout(loadingTimer);
+    if (token !== renderToken) return;
     console.error(e);
-    app.innerHTML = `<div class="banner warn" style="margin:24px">页面加载失败：${e.message}<br>请刷新重试，或确认通过 http://127.0.0.1:8766 打开。</div>`;
+    app.innerHTML = `<div class="banner warn" style="margin:24px">页面加载失败：${e.message}<br>请刷新重试，或确认网络后再打开。</div>`;
   }
+  if (token !== renderToken) return;
   app.classList.remove('fade-in');
   void app.offsetWidth;
   app.classList.add('fade-in');
@@ -132,7 +140,7 @@ async function renderPage() {
 window.addEventListener('hashchange', renderPage);
 window.addEventListener('resize', () => {
   document.querySelectorAll('.chart').forEach((el) => {
-    const ch = echarts.getInstanceByDom(el);
+    const ch = window.echarts?.getInstanceByDom(el);
     if (ch) ch.resize();
   });
 });
@@ -170,12 +178,18 @@ window.__refreshQuotes = refreshQuotesInBackground;
 async function boot() {
   const urlTheme = new URLSearchParams(location.search).get('theme');
   applyTheme(urlTheme === 'light' || urlTheme === 'dark' ? urlTheme : (localStorage.getItem('d3:theme') || 'dark'));
+  // 首屏先画导航和骨架，不等 2.3MB 核心数据：弱网/手机上先有反馈，避免白屏
+  const bootId = currentId();
+  document.title = `${(PAGES.find((p) => p.id === bootId) || PAGES[0]).label} · 红利工具`;
+  renderSidebar(bootId);
+  renderTabbar(bootId);
+  app.innerHTML = skeleton();
   try {
     await loadCore();
     performance.mark?.('d3-core-done');
   } catch (e) {
     console.error(e);
-    app.innerHTML = `<div class="banner warn" style="margin:24px">数据加载失败：${e.message}<br>请确认通过 http://127.0.0.1:8766 打开（file:// 不能 fetch json）。</div>`;
+    app.innerHTML = `<div class="banner warn" style="margin:24px">数据加载失败：${e.message}<br>请刷新重试，或检查网络后重新打开。</div>`;
     return;
   }
   setBacktestRerender(() => renderPage());

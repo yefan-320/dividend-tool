@@ -32,7 +32,9 @@ export function openBuyModal(code, opts = {}) {
           const shares = Number(document.getElementById('buyShares')?.value);
           const px = Number(document.getElementById('buyPrice')?.value);
           if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) { toast('请选择买入日期'); return false; }
+          if (date > today) { toast('买入日期不能晚于今天（' + today + '）'); return false; }
           if (!(shares > 0) || !(px > 0)) { toast('股数和成本价要大于 0'); return false; }
+          if (shares > 1e9) { toast('股数过大，请核对'); return false; }
           addTx({ date, code, side: 'buy', shares, price: px, fee: 5 });
           toast(`已计入组合：${name} ${shares} 股`);
           setTimeout(() => { (opts.onDone || window.__rerender)?.(); }, 60);

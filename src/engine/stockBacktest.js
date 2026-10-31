@@ -154,10 +154,13 @@ export function runStockBacktest(o) {
   const totalIn = capital + yearly.reduce((s, x) => s + (x.invest || 0), 0);
   const totalDiv = Object.values(divByY).reduce((s, x) => s + x, 0);
   const flowing = totalIn > capital;
+  // capital=0 时收益率无定义：返回 null，不产生 NaN
+  const ret = capital > 0 ? end / capital - 1 : null;
+  const retHold = capital > 0 ? endHold / capital - 1 : null;
   const cagr = flowing
     ? xirr(flows.concat([[nav[nav.length - 1][0], end]]))
-    : annualize(end / capital - 1, from, to);
-  const cagrHold = annualize(endHold / capital - 1, from, to);
+    : (ret == null ? null : annualize(ret, from, to));
+  const cagrHold = retHold == null ? null : annualize(retHold, from, to);
   const bench = benchmarkSeries
     ? buildBenchmark({ dates, rows: benchmarkSeries, capital, monthlyAdd, from, to, flows: flowing })
     : null;
@@ -169,8 +172,8 @@ export function runStockBacktest(o) {
     code, from, to, dates, nav, navHold, trades, divByY, yearly,
     totalDiv, totalIn, end, endHold,
     stats: {
-      ret: end / capital - 1,
-      retHold: endHold / capital - 1,
+      ret,
+      retHold,
       retFund: totalIn > 0 ? end / totalIn - 1 : null,
       cagr, cagrHold,
       mdd: ddStat.mdd,

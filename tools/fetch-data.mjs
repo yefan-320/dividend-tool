@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const DATA = path.join(ROOT, 'data');
@@ -23,11 +24,33 @@ fs.mkdirSync(DATA, { recursive: true });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * 返回抓取所需的基础数据（股票池 / 历史月线 / 持仓）。
+ * 旧 2.0 的 snapshot-data.js 已删除：有就继续兼容，没有就退回当前 data/ 下的文件，
+ * 这样 `npm run fetch` 在不依赖旧仓库的情况下也能用。
+ */
 export function loadSnap() {
-  const code = fs.readFileSync(path.resolve(ROOT, '../repo/data/snapshot-data.js'), 'utf8');
-  const ctx = { window: {} };
-  vm.runInNewContext(code, ctx);
-  return ctx.window.__SNAP__;
+  const legacy = path.resolve(ROOT, '../repo/data/snapshot-data.js');
+  if (fs.existsSync(legacy)) {
+    const code = fs.readFileSync(legacy, 'utf8');
+    const ctx = { window: {} };
+    vm.runInNewContext(code, ctx);
+    return ctx.window.__SNAP__;
+  }
+  const baseline = JSON.parse(fs.readFileSync(path.join(DATA, 'baseline.json'), 'utf8'));
+  const prices = {};
+  try {
+    const monthly = JSON.parse(fs.readFileSync(path.join(DATA, 'monthly.json'), 'utf8'));
+    for (const code of Object.keys(monthly.months || {})) prices[code] = {};
+  } catch (e) { /* 首次抓取时还没有 monthly.json */ }
+  return {
+    pool: baseline.pool || {},
+    dividends: baseline.dividends || {},
+    f10: baseline.f10 || {},
+    holdings: baseline.holdings || [],
+    prices,
+    hs300: baseline.hs300 || {},
+  };
 }
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36';
@@ -174,8 +197,12 @@ async function fetchIndex() {
   console.log('-> data/index.json');
 }
 
-const cmd = process.argv[2] || 'all';
-const snap = loadSnap();
-if (cmd === 'quotes' || cmd === 'all') await fetchQuotes(snap);
-if (cmd === 'monthly' || cmd === 'all') await fetchMonthly(snap);
-if (cmd === 'index' || cmd === 'all') await fetchIndex();
+// 只有直接运行才抓取；被 import 时只暴露 loadSnap 等纯函数，方便测试
+const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
+if (isMain) {
+  const cmd = process.argv[2] || 'all';
+  const snap = loadSnap();
+  if (cmd === 'quotes' || cmd === 'all') await fetchQuotes(snap);
+  if (cmd === 'monthly' || cmd === 'all') await fetchMonthly(snap);
+  if (cmd === 'index' || cmd === 'all') await fetchIndex();
+}

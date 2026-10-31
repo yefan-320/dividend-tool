@@ -94,9 +94,11 @@ node tools/fetch-data.mjs all        # 行情 + 月线 + 指数（约 3 分钟�
 node tools/fetch-finance.mjs 2011 2025
 node tools/fetch-daily.mjs --offline-cache   # 可选：想把全市场日 K 落盘当离线缓存时再跑（默认不跑，页面按需联网）
 node tools/build-derivatives.mjs      # 生成 dy-pct.json（分位预计算）
-node tools/import-baseline.mjs        # 从 ../repo 导入分红 / 财报（一次性）
 node tools/audit-app.mjs              # 数据 + 引擎体检 → ../report/AUDIT-APP.md
 ```
+
+> 旧 2.0 的 `snapshot-data.js` 已随旧仓库删除；`fetch-data.mjs` 会自动改用当前
+> `data/baseline.json` + `data/monthly.json` 里的股票池/持仓，不再需要单独的导入脚本。
 
 ## 引擎（纯函数 + 单测）
 
@@ -117,19 +119,24 @@ src/engine/verdict.js           单股决策：亏损/支付率≥85%/现金流�
 ## 测试与体检
 
 ```bash
-node --test test/*.test.js     # 80 个用例（finance/portfolio/market/verdict/plan/建仓节奏/组合回测/个股回测/联网解析）
+node --test test/*.test.js     # 141 个用例（finance/portfolio/market/verdict/plan/建仓节奏/组合回测/个股回测/数据层/本地账本/格式化/联网解析）
+node tools/check-static.mjs    # 静态检查：index.html / sw.js SHELL / import / manifest / 数据文件引用
 node tools/smoke-all.mjs       # 浏览器全站冒烟：5 页 + 4 选股视图 + 3 我的视图 + 方案编辑/执行清单 + 深浅色 + 移动端（36 项）
 node tools/audit-app.mjs       # 数据覆盖/一致性/异常值 + 引擎自检
-node tools/perf.mjs            # 冷/热加载性能
+node tools/perf.mjs            # 冷/热加载性能（含 ECharts 按需加载核验）
+node tools/perf-boot.mjs       # 首屏启动：本地 vs 慢 4G + 4x CPU（骨架出现时间 / 完整首屏）
+node tools/perf-render.mjs     # 各页面 render() 耗时（CPU 4x，比较优化前后）
 node tools/shot.js             # 界面截图 → ../report/design/
 ```
 
+`npm run verify` = 单测 + 静态检查 + 数据体检（不需要浏览器）；`npm run smoke` / `npm run perf` 需要本地 8766 + Chrome 9222。
+
 当前结果：
 
-- 单测 **80/80**；
+- 单测 **141/141**；
 - 冒烟 **36/36**，0 console 报错；
 - 数据体检：全部通过（覆盖 / 时点 / 股息率分布 / 日 K 与行情一致性 / 未上市识别 / 引擎起点净值=本金）；
-- 加载性能（1280×1000，本地）：冷加载 100–260ms、热加载 60–170ms、首屏渲染 60–160ms；今天/我的/选股/个股首屏数据 2.3MB，回测 9.5MB（月线 + 历史财报，按需）。
+- 加载性能（1280×1000，本地）：冷加载 107–329ms、热加载 57–176ms、首屏渲染 52–174ms；首屏 JS 319KB（ECharts 1MB 改为按需加载，仅个股/回测页首次进页加载）；核心数据 2.3MB，回测 9.5MB（月线 + 历史财报，按需）。
 
 ## 联网与离线
 
@@ -163,12 +170,13 @@ src/
 data/        静态 JSON（核心快照 + 演示持仓日 K；其余日 K 按需联网）
 sw.js        Service Worker（PWA 离线缓存）
 manifest.webmanifest  PWA 清单
-tools/       fetch / import / audit / derivatives / backtest / perf / shot / smoke
+tools/       fetch / audit / derivatives / backtest / check-static / perf / perf-boot / perf-render / shot / smoke / ui-audit
 test/        node --test 单测
 ```
 
 ## 约束
 
-- 不复制 `../repo/app/**` 的代码；不修改 `../repo/`（`git -C repo status --short` 必须为空）。
+- 纯静态站点、无构建步骤：改源码后刷新即可，发布 = `git push origin main`（SSH deploy key，免 GitHub 授权）。
+- 数据全部本地 JSON；联网只访问腾讯公开行情接口，不上传持仓。
 - 不共用原工具的存储键（本工具统一 `d3:` 前缀）。
 - 不承诺预测涨跌；只给条件、证据和可复现的回测。

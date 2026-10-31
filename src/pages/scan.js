@@ -25,6 +25,7 @@ export const scanState = {
 
 let UNIVERSE = null;
 let U_MAP = null;
+let U_REV = -1;   // 建 UNIVERSE 时的行情版本，盯盘刷新后要重建，避免显示旧价
 let PCT = null;
 let PCT_PROMISE = null;
 let CMP_READY = 0;
@@ -43,7 +44,7 @@ function evalCtx() {
 }
 
 function buildUniverse() {
-  if (UNIVERSE) return UNIVERSE;
+  if (UNIVERSE && U_REV === db.quoteRev) return UNIVERSE;
   const ctx = evalCtx();
   const pool = db.baseline.pool || {};
   const divs = db.baseline.dividends || {};
@@ -72,10 +73,12 @@ function buildUniverse() {
       hasFin: m.hasFin, quality, pct: null,
     });
   }
+  if (PCT) for (const r of out) r.pct = PCT.get(r.code) ?? null;
   for (const r of out) r.score = scoreOf(r);
   out.sort((a, b) => b.dy - a.dy);
   UNIVERSE = out;
   U_MAP = new Map(out.map((r) => [r.code, r]));
+  U_REV = db.quoteRev;
   return out;
 }
 

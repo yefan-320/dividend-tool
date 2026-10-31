@@ -42,7 +42,10 @@ export function dividendsForLot(lot, divs, today) {
  * @param {Array} txs [{id,date,code,side:'buy'|'sell',shares,price,fee?}]
  */
 export function buildLots(txs) {
-  const sorted = [...txs].sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1));
+  // 无日期 / 非法日期的交易直接丢弃（旧备份、脏 localStorage 可能写坏；parseDate 会抛错）
+  const sorted = (Array.isArray(txs) ? txs : [])
+    .filter((tx) => tx && typeof tx.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(tx.date) && Number.isFinite(parseDate(tx.date)))
+    .sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1));
   const queues = new Map(); // code -> [{date, shares, price, fee}]
   const realized = [];
   for (const tx of sorted) {
@@ -102,8 +105,10 @@ export function lotStats(lot, quotes, divs, today) {
   const marketValue = nowPrice ? nowPrice * lot.shares : null;
   const pnl = marketValue != null ? marketValue + divCash - cost : null;
   const ret = pnl != null && cost > 0 ? pnl / cost : null;
-  const days = Math.max(1, Math.round((parseDate(today) - parseDate(lot.date)) / DAY));
-  const annualized = ret != null ? Math.pow(1 + ret, 365.25 / days) - 1 : null;
+  // 未来日期的买入（脏数据）年化无意义：持有天数按 1 天展示，但年化返回 null，避免 1e28 级数字
+  const heldDays = Math.round((parseDate(today) - parseDate(lot.date)) / DAY);
+  const days = Math.max(1, heldDays);
+  const annualized = ret != null && heldDays > 0 ? Math.pow(1 + ret, 365.25 / days) - 1 : null;
 
   const flows = [{ date: lot.date, amount: -cost }];
   for (const d of dividends) flows.push({ date: d.payDate, amount: d.cash });

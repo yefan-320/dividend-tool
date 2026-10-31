@@ -15,7 +15,7 @@
   /* 文本 */
   --text: #e9edf2;
   --text-2: #9aa6b5;
-  --text-3: #65707e;
+  --text-3: #7e8a99;
 
   /* 线 */
   --line: rgba(255, 255, 255, .065);
@@ -34,7 +34,6 @@
   --danger: #e5534b;
   --info: #5b9cf5;
   --ok: #35b57a;
-
   /* 圆角 / 间距 */
   --r-sm: 7px;
   --r: 11px;
@@ -67,21 +66,21 @@
 
   --text: #0f141a;
   --text-2: #5a6573;
-  --text-3: #8a94a1;
+  --text-3: #65707e;
 
   --line: rgba(15, 20, 26, .075);
   --line-strong: rgba(15, 20, 26, .13);
 
-  --accent: #96661b;
-  --accent-2: #b98434;
+  --accent: #7d5514;
+  --accent-2: #8a5f18;
   --accent-soft: rgba(150, 102, 27, .08);
   --accent-line: rgba(150, 102, 27, .22);
 
   --up: #d33a3f;
   --down: #16895a;
-  --warn: #b8791b;
-  --danger: #c83932;
-  --info: #2f6fd0;
+  --warn: #9a6412;
+  --danger: #bf342e;
+  --info: #2a66c4;
   --ok: #16895a;
 
   --shadow: 0 1px 2px rgba(15, 20, 26, .04), 0 12px 32px rgba(15, 20, 26, .06);

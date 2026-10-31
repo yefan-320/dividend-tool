@@ -76,6 +76,31 @@ function normalizeEntry(entry) {
 }
 
 /**
+ * 目标结构归一化（引擎入口防御；UI 正常路径已由 plan.normalizePlan 处理）：
+ *  - 合并重复代码（权重相加）——否则同一只股票会被买两次、持仓市值双计；
+ *  - 丢弃空代码，非有限 / 负数权重按 0；
+ *  - 权重合计 >100 时按比例缩到 100——否则 once 初始建仓现金会为负。
+ * @returns {{holdings:Array<{code:string,weight:number}>, totalW:number}}
+ */
+function normalizeHoldings(holdings) {
+  const map = new Map();
+  for (const h of Array.isArray(holdings) ? holdings : []) {
+    const code = h && h.code != null ? String(h.code).trim() : '';
+    if (!code) continue;
+    const w = Number(h.weight);
+    const safe = Number.isFinite(w) && w > 0 ? w : 0;
+    map.set(code, (map.get(code) || 0) + safe);
+  }
+  const list = [...map.entries()].map(([code, weight]) => ({ code, weight }));
+  let totalW = list.reduce((a, h) => a + h.weight, 0);
+  if (totalW > 100) {
+    for (const h of list) h.weight = (h.weight / totalW) * 100;
+    totalW = 100;
+  }
+  return { holdings: list, totalW };
+}
+
+/**
  * 基准同口径：同样本金 + 同样月追加买指数。
  * @returns {{rows:Array, cagr:number|null, end:number}}
  */
@@ -143,9 +168,10 @@ export function runPortfolioBacktest(o) {
     benchmarkSeries = null, lowVolSeries = null, buildDelayMonths = 6, entry = null,
   } = o;
   const entryIn = normalizeEntry(entry);
-  const codes = holdings.map((h) => h.code).filter((c) => c);
-  const wOf = new Map(holdings.map((h) => [h.code, Number(h.weight) || 0]));
-  const totalW = holdings.reduce((a, h) => a + (Number(h.weight) || 0), 0);
+  const norm = normalizeHoldings(holdings);
+  const codes = norm.holdings.map((h) => h.code);
+  const wOf = new Map(norm.holdings.map((h) => [h.code, h.weight]));
+  const totalW = norm.totalW;
   const cashPct = Math.max(0, 100 - totalW);
   const px = (code, date) => priceAt(series.get(code), date);
   const flowing = monthlyAdd > 0;
@@ -173,12 +199,18 @@ export function runPortfolioBacktest(o) {
   const hasAdd = totalIn > capital;
   const flowsN = result.flowsN;
   const flowsR = result.flowsR;
+  // 收益率基准：投入回测 = 本金；持仓回放 = 期初净值（replay 用 lots + cash0 起算，capital 只是 UI 参数）
+  const nav0 = result.nav.length ? result.nav[0][1] : capital;
+  const base = mode === 'replay' ? nav0 : capital;
+  // base=0 时收益率无定义：返回 null（页面显示「—」），不产生 NaN / Infinity
+  const ret = base > 0 ? end / base - 1 : null;
+  const retR = base > 0 ? endR / base - 1 : null;
   const cagr = hasAdd
     ? xirr(flowsN.concat([[result.nav[result.nav.length - 1][0], end]]))
-    : annualize(end / capital - 1, from, to);
+    : (ret == null ? null : annualize(ret, from, to));
   const cagrR = hasAdd
     ? xirr(flowsR.concat([[result.navR[result.navR.length - 1][0], endR]]))
-    : annualize(endR / capital - 1, from, to);
+    : (retR == null ? null : annualize(retR, from, to));
   const benchStat = bench ? maxDrawdown(bench.rows) : null;
 
   return {
@@ -189,8 +221,8 @@ export function runPortfolioBacktest(o) {
     entry: entryOut,
     totalDiv, totalIn, end, endR, cashEnd: result.cashEnd,
     stats: {
-      ret: end / capital - 1,
-      retR: endR / capital - 1,
+      ret,
+      retR,
       retFund: totalIn > 0 ? end / totalIn - 1 : null,
       cagr,
       cagrR,
@@ -517,7 +549,8 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
         gaps.push(n * p);
       }
     }
-    cash = capital - gaps.reduce((a, b) => a + b, 0);
+    // 权重已在入口归一化（合计 ≤100），整手向下取整后不会超过本金；Math.max 兜底浮点误差
+    cash = Math.max(0, capital - gaps.reduce((a, b) => a + b, 0));
     cashR = cash;
   }
 

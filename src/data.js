@@ -14,6 +14,7 @@ const dataUrl = (f) => new URL(`../data/${f}`, import.meta.url);
 export const db = {
   ready: false,
   quotes: {},       // {code:{n,p,prev,o,hi,lo,date}}
+  quoteRev: 0,      // 行情变更计数：页面级缓存用它判断是否需要重建（盯盘刷新后不显示旧价）
   baseline: null,   // {pool, dividends, f10, holdings}
   benchmark: {},    // {ym: value}
   monthly: null,    // {code:[[ym,close]]}
@@ -51,8 +52,12 @@ export async function loadCore() {
 
 export async function loadFinanceHistory() {
   if (db.finHistory) return db.finHistory;
-  const j = await getJson('finance-history.json');
-  db.finHistory = j.data || {};
+  try {
+    const j = await getJson('finance-history.json');
+    db.finHistory = j.data || {};
+  } catch (e) {
+    throw new Error('历史财报数据没加载成功（离线时需先联网打开过一次回测）。原始错误：' + e.message);
+  }
   return db.finHistory;
 }
 
@@ -72,8 +77,13 @@ export function finHistoryOf(code) {
 
 export async function loadMonthly() {
   if (db.monthly) return db.monthly;
-  const j = await getJson('monthly.json');
-  db.monthly = j.months || {};
+  try {
+    const j = await getJson('monthly.json');
+    db.monthly = j.months || {};
+  } catch (e) {
+    // 月线 6.5MB 不预缓存（手机流量友好）：离线首次进回测页给明确提示，而不是 503 报错
+    throw new Error('月线数据没加载成功：回测需要 6.5MB 月线，该文件不预缓存。请联网打开一次回测页（之后即可离线使用）。原始错误：' + e.message);
+  }
   return db.monthly;
 }
 
@@ -156,6 +166,7 @@ function mergeQuotes(qmap) {
   }
   const d = maxQuoteDate(qmap);
   if (d && d > (db.generated || '')) { db.generated = d; changed = true; }
+  if (changed) db.quoteRev++;
   return changed;
 }
 
@@ -220,46 +231,57 @@ export function dividendsOf(code) {
   return db.baseline?.dividends?.[code] || null;
 }
 
+/* 分红索引：baseline.dividends 有 5400+ 只，今天页/选股页每次渲染都要扫全池。
+   预先摊平成 Map（一次 O(n)），避免反复 Object.keys + filter + sort。
+   baseline 对象被整体替换时自动重建。 */
+
+let divIndexCache = null;
+
+function divIndex() {
+  if (divIndexCache && divIndexCache.baseline === db.baseline) return divIndexCache.map;
+  const map = new Map();
+  for (const [code, d] of Object.entries(db.baseline?.dividends || {})) {
+    const years = d.years || {};
+    const ys = Object.keys(years).map(Number).filter((y) => years[y] > 0).sort((a, b) => a - b);
+    if (!ys.length) {
+      map.set(code, { years, nYears: 0, consecutive: 0, firstY: null, lastY: null, dps: 0 });
+      continue;
+    }
+    const lastY = ys[ys.length - 1];
+    let consecutive = 0;
+    for (let y = lastY; y >= lastY - 30; y--) {
+      if (years[y] > 0) consecutive++;
+      else break;
+    }
+    map.set(code, { years, nYears: ys.length, consecutive, firstY: ys[0], lastY, dps: years[lastY] });
+  }
+  divIndexCache = { baseline: db.baseline, map };
+  return map;
+}
+
+/** 分红索引条目（只读），没有该股票时返回 null */
+export function divIndexEntry(code) {
+  return divIndex().get(String(code)) || null;
+}
+
 /** 最近年度每股分红 */
 export function lastDps(code) {
-  const d = dividendsOf(code);
-  if (!d) return null;
-  const years = d.years || {};
-  const ys = Object.keys(years).map(Number).filter((y) => years[y] > 0).sort((a, b) => a - b);
-  if (!ys.length) return null;
-  const y = ys[ys.length - 1];
-  return { year: y, dps: years[y] };
+  const e = divIndexEntry(code);
+  if (!e || e.lastY == null) return null;
+  return { year: e.lastY, dps: e.dps };
 }
 
 /** 用最新价重算股息率（%） */
 export function currentDy(code) {
   const q = quote(code);
-  const d = lastDps(code);
-  if (!q?.p || !d?.dps) return null;
-  return (d.dps / q.p) * 100;
+  const e = divIndexEntry(code);
+  if (!q?.p || !e?.dps) return null;
+  return (e.dps / q.p) * 100;
 }
 
 /** 最近 N 年每股分红合计 / 连续年数 */
 export function divSummary(code) {
-  const d = dividendsOf(code);
-  if (!d) return null;
-  const years = d.years || {};
-  const ys = Object.keys(years).map(Number).filter((y) => years[y] > 0).sort((a, b) => a - b);
-  let consecutive = 0;
-  if (ys.length) {
-    const last = ys[ys.length - 1];
-    for (let y = last; y >= last - 30; y--) {
-      if (years[y] > 0) consecutive++;
-      else break;
-    }
-  }
-  return {
-    nYears: ys.length,
-    consecutive,
-    firstY: ys[0] ?? null,
-    lastY: ys[ys.length - 1] ?? null,
-    years,
-  };
+  return divIndexEntry(code);
 }
 
 /** 数据源概况，给页面脚注 */

@@ -19,6 +19,7 @@ import {
   drawEnvChart, drawDivChart, drawSimilarChart, drawLineMini, drawBarsVs, drawMultiLineChart,
 } from '../charts.js';
 import { icon } from '../ui/icons.js';
+import { toast } from '../ui/toast.js';
 import { esc, num, pct, pctSign, upDown } from '../ui/format.js';
 
 const todayStr = () => db.generated || '2026-10-30';
@@ -472,7 +473,10 @@ function renderPort(market, structureData) {
   const capW = capital / 10000;
   const endW = r.end / 10000;
   const divEst = estimateAnnualDiv(structureData.holdings, series, dates[dates.length - 1], r.end);
-  const expense = Math.max(1, Number(loadSettings().expense) || 4000);
+  // 月支出必须 ≥100 元：旧版设置可能存了负数/0，不再静默兜成 1（会算出 65 万 % 这种荒谬结论）
+  const expenseRaw = Number(loadSettings().expense);
+  const expenseOk = Number.isFinite(expenseRaw) && expenseRaw >= 100 && expenseRaw <= 1e7;
+  const expense = expenseOk ? expenseRaw : 4000;
   const cov = (divEst / 12 / expense) * 100;
   const avgPct = currentPortfolioPercentile(structureData.holdings.map((h) => h.code), market.months);
   const retBase = hasAdd ? s.retFund || 0 : s.ret;
@@ -498,7 +502,7 @@ function renderPort(market, structureData) {
     { k: '红利不复投', v: (r.endR / 10000).toFixed(0) + '万', s: `年化 ${pctSign(s.cagrR == null ? null : s.cagrR * 100, 1)}`, key: 'navR', on: btState.metric === 'navR' },
     { k: '最大回撤', v: pct(s.mdd * 100, 1), cls: 'down', s: `${esc(s.mddPeak)} → ${esc(s.mddTrough)}`, key: 'dd', on: btState.metric === 'dd' },
     { k: '年分红(估)', v: (divEst / 10000).toFixed(1) + '万', s: '当前持仓 × 最新年度每股分红', key: 'div', on: btState.metric === 'div' },
-    { k: '月覆盖', v: cov.toFixed(0) + '%', s: `年分红 ÷ 12 ÷ 月支出 ${expense.toLocaleString('zh-CN')}`, key: 'repay', on: btState.metric === 'repay' },
+    { k: '月覆盖', v: expenseOk ? (cov > 999 ? '>999%' : cov.toFixed(0) + '%') : '—', s: expenseOk ? `年分红 ÷ 12 ÷ 月支出 ${expense.toLocaleString('zh-CN')}` : '月支出设置无效（需 100 元–1000 万/月），请到「我的 → 设置」修正', key: 'repay', on: btState.metric === 'repay' },
     { k: 'vs 指数', v: excess == null ? '—' : (excess >= 0 ? '+' : '') + excess.toFixed(1) + 'pp', cls: upDown(excess), s: 'vs 中证红利全收益 年化', key: 'hold', on: btState.metric === 'hold' },
   ];
 
@@ -1000,14 +1004,33 @@ export function bindBacktest() {
 function readParams() {
   const from = document.getElementById('btFrom')?.value;
   const to = document.getElementById('btTo')?.value;
-  const cap = Number(document.getElementById('btCap')?.value) * 10000;
-  const mon = Number(document.getElementById('btMon')?.value) || 0;
+  const capW = Number(document.getElementById('btCap')?.value);
+  const mon = Number(document.getElementById('btMon')?.value);
   const minDyEl = document.getElementById('btMinDy');
-  if (from && to && from < to) { btState.from = clampFrom(from); btState.to = to; }
-  if (cap > 0) btState.capital = cap;
+  const minDy = minDyEl ? Number(minDyEl.value) : 5;
+  // 非法参数给明确提示并阻止重跑，而不是静默丢弃（用户会以为已经按新参数跑过）
+  if (!(from && to && from < to)) { toast('开始日期要早于结束日期'); return false; }
+  if (!(Number.isFinite(capW) && capW > 0)) { toast('本金要大于 0（单位：万）'); return false; }
+  if (!(Number.isFinite(mon) && mon >= 0)) { toast('月追加不能为负数'); return false; }
+  if (minDyEl && !(Number.isFinite(minDy) && minDy >= 0 && minDy <= 10)) { toast('买入股息率门槛需在 0–10% 之间'); return false; }
+
+  btState.from = clampFrom(from);
+  btState.to = to;
+  btState.capital = capW * 10000;
   btState.monthlyAdd = mon;
-  if (minDyEl) btState.minDy = Number(minDyEl.value) || 5;
+  if (minDyEl) btState.minDy = minDy;
+  // 把归一化后的合法值回写输入框（日期会被 clamp 到有数据的起点）
+  const fromEl = document.getElementById('btFrom');
+  const toEl = document.getElementById('btTo');
+  const capEl = document.getElementById('btCap');
+  const monEl = document.getElementById('btMon');
+  if (fromEl) fromEl.value = btState.from;
+  if (toEl) toEl.value = btState.to;
+  if (capEl) capEl.value = btState.capital / 10000;
+  if (monEl) monEl.value = btState.monthlyAdd;
+  if (minDyEl) minDyEl.value = btState.minDy;
   if (rerenderHook) rerenderHook();
+  return true;
 }
 
 function drawStockPageCharts() {

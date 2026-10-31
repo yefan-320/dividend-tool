@@ -198,7 +198,7 @@
   padding: 14px 18px;
   border-bottom: 1px solid var(--line);
 }
-.panel-title { font-size: 13px; font-weight: 650; }
+.panel-title { font-size: 13px; font-weight: 650; flex-shrink: 0; white-space: nowrap; }
 .panel-body { padding: 18px; }
 .panel-body.flush { padding: 0; }
 
@@ -245,3 +245,23 @@
 .page-loading{display:flex;align-items:center;gap:10px;justify-content:center;min-height:240px;color:var(--text-3);font-size:12px}
 .page-loading .dot{animation:pulse 1s infinite}
 @keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
+
+/* ---------- 窄屏：页头/面板头改为纵向，避免标题被挤成竖排 ---------- */
+@media (max-width: 640px) {
+  .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .page-actions { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+  .panel-head { flex-wrap: wrap; row-gap: 4px; padding: 12px 14px; }
+  .panel-head .section-note { flex: 1 1 100%; }
+}
+
+/* ---------- 触屏：扩大偏小的点击目标（表格星标 / chip / 模式按钮） ---------- */
+@media (pointer: coarse) {
+  .btn.sm { min-height: 32px; }
+  .chip { min-height: 32px; }
+  .bt-chip { min-height: 32px; }
+  .icon-star { min-width: 32px; min-height: 32px; padding: 6px 8px; }
+  .view-tab { min-height: 38px; }
+  #themeBtn { min-width: 34px; min-height: 34px; }
+  .lot-table .btn { min-width: 32px; min-height: 32px; }
+  input.input { min-height: 32px; }
+}

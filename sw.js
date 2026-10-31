@@ -1,6 +1,6 @@
 /* 红利工具 Service Worker：应用外壳预缓存 + 数据 stale-while-revalidate。
    代码更新时把 VERSION 加一即可让旧缓存失效。 */
-const VERSION = 'd3-v2';
+const VERSION = 'd3-v3';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './styles/tokens.css', './styles/base.css', './styles/components.css', './styles/pages.css',
@@ -54,8 +54,15 @@ self.addEventListener('fetch', (e) => {
   // 外壳：缓存优先，后台更新
   e.respondWith((async () => {
     const cache = await caches.open(VERSION);
-    const hit = await cache.match(req);
+    // ignoreSearch：?theme=light 之类入口参数不影响拿到缓存的外壳（否则离线启动白屏）
+    const hit = await cache.match(req, { ignoreSearch: true });
     const net = fetch(req).then((res) => { if (res.ok && res.type === 'basic') cache.put(req, res.clone()); return res; }).catch(() => null);
-    return hit || (await net) || new Response('offline', { status: 503 });
+    if (hit) return hit;
+    // 导航请求兜底到 index.html（SPA 只有这一个 HTML 入口）
+    if (req.mode === 'navigate') {
+      const shell = await cache.match(new URL('./index.html', self.registration.scope).href, { ignoreSearch: true });
+      if (shell) return shell;
+    }
+    return (await net) || new Response('offline', { status: 503 });
   })());
 });

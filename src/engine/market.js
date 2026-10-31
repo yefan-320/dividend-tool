@@ -135,11 +135,13 @@ export function dyQuality({ dividends, finHistory, code, year, price }) {
   };
 }
 
-/** 年化（按自然日） */
+/** 年化（按自然日）；totalRet 非有限时返回 null（capital=0 等无意义输入） */
 export function annualize(totalRet, from, to) {
+  if (!Number.isFinite(totalRet)) return null;
   const days = (Date.parse(to) - Date.parse(from)) / 86400000;
   if (!(days > 0)) return null;
-  return Math.pow(1 + totalRet, 365.25 / days) - 1;
+  const v = Math.pow(1 + totalRet, 365.25 / days) - 1;
+  return Number.isFinite(v) ? v : null;
 }
 
 /** 最大回撤 */

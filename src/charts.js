@@ -42,7 +42,7 @@ function baseAxis(t) {
 
 /* ---------------- 日 K：蜡烛 + 成交量 + 均线 + 买卖/分红标注 ---------------- */
 
-export function drawCandleChart(el, rows, opts = {}) {
+function drawCandleChartImpl(el, rows, opts = {}) {
   if (!el || typeof echarts === 'undefined' || !rows || rows.length < 2) return null;
   const t = theme();
   const ch = chart(el);
@@ -121,7 +121,7 @@ export function drawCandleChart(el, rows, opts = {}) {
 
 /* ---------------- 组合回测主图：资产 + 回撤 + 分红 ---------------- */
 
-export function drawPortfolioChart(el, { nav, navR, bench, lowVol, dd, divByY, capital }) {
+function drawPortfolioChartImpl(el, { nav, navR, bench, lowVol, dd, divByY, capital }) {
   if (!el || typeof echarts === 'undefined' || !nav || nav.length < 2) return null;
   const t = theme();
   const ch = chart(el);
@@ -171,7 +171,7 @@ export function drawPortfolioChart(el, { nav, navR, bench, lowVol, dd, divByY, c
 
 /* ---------------- 个股回测：净值 + 基准 + 回撤 ---------------- */
 
-export function drawNavChart(el, { nav, bench, dd, hold, capital }) {
+function drawNavChartImpl(el, { nav, bench, dd, hold, capital }) {
   if (!el || typeof echarts === 'undefined' || !nav || nav.length < 2) return null;
   const t = theme();
   const ch = chart(el);
@@ -213,7 +213,7 @@ export function drawNavChart(el, { nav, bench, dd, hold, capital }) {
 
 /* ---------------- 持仓构成环形图 ---------------- */
 
-export function drawDonut(el, entries) {
+function drawDonutImpl(el, entries) {
   if (!el || typeof echarts === 'undefined') return null;
   const t = theme();
   const ch = chart(el);
@@ -233,7 +233,7 @@ export function drawDonut(el, entries) {
 
 /* ---------------- 收益拆解瀑布 ---------------- */
 
-export function drawWaterfall(el, { capital, div, end }) {
+function drawWaterfallImpl(el, { capital, div, end }) {
   if (!el || typeof echarts === 'undefined') return null;
   const t = theme();
   const ch = chart(el);
@@ -267,7 +267,7 @@ export function drawWaterfall(el, { capital, div, end }) {
 
 /* ---------------- 分环境对比 ---------------- */
 
-export function drawEnvChart(el, rows) {
+function drawEnvChartImpl(el, rows) {
   if (!el || typeof echarts === 'undefined') return null;
   const t = theme();
   const ch = chart(el);
@@ -289,7 +289,7 @@ export function drawEnvChart(el, rows) {
 
 /* ---------------- 年度分红（柱 + 累计线） ---------------- */
 
-export function drawDivChart(el, divByY) {
+function drawDivChartImpl(el, divByY) {
   if (!el || typeof echarts === 'undefined') return null;
   const t = theme();
   const ch = chart(el);
@@ -313,7 +313,7 @@ export function drawDivChart(el, divByY) {
 
 /* ---------------- 历史相似状态散点 ---------------- */
 
-export function drawSimilarChart(el, points, curPct, median) {
+function drawSimilarChartImpl(el, points, curPct, median) {
   if (!el || typeof echarts === 'undefined') return null;
   const t = theme();
   const ch = chart(el);
@@ -337,7 +337,7 @@ export function drawSimilarChart(el, points, curPct, median) {
 
 /* ---------------- 年度数据小图 ---------------- */
 
-export function drawLineMini(el, rows, opts = {}) {
+function drawLineMiniImpl(el, rows, opts = {}) {
   if (!el || typeof echarts === 'undefined' || !rows || rows.length < 2) return null;
   const t = theme();
   const ch = chart(el);
@@ -353,7 +353,7 @@ export function drawLineMini(el, rows, opts = {}) {
   return ch;
 }
 
-export function drawBarsVs(el, years, a, b) {
+function drawBarsVsImpl(el, years, a, b) {
   if (!el || typeof echarts === 'undefined') return null;
   const t = theme();
   const ch = chart(el);
@@ -375,7 +375,7 @@ export function drawBarsVs(el, years, a, b) {
 
 /* ---------------- 多线对比（组合对比 / 对照图） ---------------- */
 
-export function drawMultiLineChart(el, series, opts = {}) {
+function drawMultiLineChartImpl(el, series, opts = {}) {
   if (!el || typeof echarts === 'undefined' || !series || !series.length) return null;
   const t = theme();
   const ch = chart(el);
@@ -396,3 +396,42 @@ export function drawMultiLineChart(el, series, opts = {}) {
   });
   return ch;
 }
+
+/* ---------------- ECharts 按需加载 ----------------
+   首屏（今天 / 我的 / 选股扫描榜）不需要图表库，1MB 的 echarts 不再用同步 <script> 加载，
+   第一次真正画图时再注入；Service Worker 仍会预缓存它，离线画图不受影响。 */
+let echartsPromise = null;
+
+export function ensureEcharts() {
+  if (typeof globalThis.echarts !== 'undefined') return Promise.resolve(globalThis.echarts);
+  if (!echartsPromise) {
+    echartsPromise = new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.src = new URL('../vendor/echarts.min.js', import.meta.url).href;
+      s.onload = () => resolve(globalThis.echarts);
+      s.onerror = () => { echartsPromise = null; resolve(null); };
+      document.head.appendChild(s);
+    });
+  }
+  return echartsPromise;
+}
+
+function deferred(fn) {
+  return function (...args) {
+    if (typeof globalThis.echarts !== 'undefined') return fn.apply(this, args);
+    ensureEcharts().then(() => fn.apply(null, args));
+    return null;
+  };
+}
+
+export const drawCandleChart = deferred(drawCandleChartImpl);
+export const drawPortfolioChart = deferred(drawPortfolioChartImpl);
+export const drawNavChart = deferred(drawNavChartImpl);
+export const drawDonut = deferred(drawDonutImpl);
+export const drawWaterfall = deferred(drawWaterfallImpl);
+export const drawEnvChart = deferred(drawEnvChartImpl);
+export const drawDivChart = deferred(drawDivChartImpl);
+export const drawSimilarChart = deferred(drawSimilarChartImpl);
+export const drawLineMini = deferred(drawLineMiniImpl);
+export const drawBarsVs = deferred(drawBarsVsImpl);
+export const drawMultiLineChart = deferred(drawMultiLineChartImpl);

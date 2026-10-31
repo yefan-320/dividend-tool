@@ -29,6 +29,8 @@
   color: #17120a;
   font-weight: 650;
 }
+/* 浅色主题 accent 本身已是深棕，主按钮/激活 chip 改用白字保证对比度 */
+[data-theme="light"] .btn.primary { color: #fff; }
 .btn.primary:hover { filter: brightness(1.05); }
 
 .btn.ghost {
@@ -54,9 +56,10 @@
   white-space: nowrap;
 }
 .pill.buy { background: rgba(216, 168, 78, .14); color: var(--accent-2); border: 1px solid rgba(216, 168, 78, .28); }
-.pill.hold { background: rgba(91, 156, 245, .11); color: #8ebcf8; border: 1px solid rgba(91, 156, 245, .22); }
+.pill.hold { background: rgba(91, 156, 245, .11); color: var(--info); border: 1px solid rgba(91, 156, 245, .22); }
 .pill.wait { background: rgba(224, 163, 62, .11); color: var(--warn); border: 1px solid rgba(224, 163, 62, .22); }
 .pill.avoid { background: rgba(229, 83, 75, .11); color: #f08a84; border: 1px solid rgba(229, 83, 75, .24); }
+[data-theme="light"] .pill.avoid { color: var(--danger); }
 .pill.na { background: transparent; color: var(--text-3); border: 1px dashed var(--line-strong); }
 .pill.neutral { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--line); }
 .pill.sm { padding: 1px 7px; font-size: 10px; }

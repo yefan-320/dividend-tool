@@ -454,7 +454,8 @@ function commitEdit() {
   const capEl = document.getElementById('edCapital');
   if (capEl) {
     const v = Number(capEl.value);
-    if (v > 0) p.capital = Math.max(1000, Math.round(v * 1e4));
+    // 本金上限 1 万亿（1e12 元）：防止 1e15 万这种输入落盘后显示 16 位数字
+    if (v > 0) p.capital = Math.min(1e12, Math.max(1000, Math.round(v * 1e4)));
   }
   return p;
 }
@@ -592,7 +593,10 @@ export function bindPlans() {
     capEl.onchange = () => {
       const v = Number(capEl.value);
       if (!(v > 0)) { toast('本金要大于 0'); return; }
-      state.editing.capital = Math.max(1000, Math.round(v * 1e4));
+      // 与 commitEdit 一致：上限 1 万亿元（1e8 万），输入阶段就钳制并回写
+      const maxWan = 1e12 / 1e4;
+      if (v > maxWan) toast('本金上限 1 万亿元，已按上限保存');
+      state.editing.capital = Math.min(1e12, Math.max(1000, Math.round(Math.min(v, maxWan) * 1e4)));
       rerender2();
     };
   }
@@ -715,6 +719,8 @@ export function bindPlans() {
       const p = commitEdit();
       if (!p) return;
       if (!p.holdings.length) return toast('先添加至少一只股票');
+      // 权重为 0 的行会被 normalizePlan 过滤掉：全为 0 时保存会落成「0 成分方案」，这里先拦住
+      if (!(planStockTotal(p) > 0)) return toast('至少给一只股票分配 >0% 的权重，再保存');
       if (planStockTotal(p) > 100.5) return toast('股票合计超过 100%，先归一化或调小比例');
       const totalW0 = planStockTotal(p);
       p.holdings = roundWeights(p.holdings, 1);

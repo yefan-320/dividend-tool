@@ -71,7 +71,8 @@ export function normalizePlan(raw) {
   return {
     id: String(r.id || ''),
     name,
-    capital: Math.max(1000, Math.round(toNum(r.capital, DEFAULT_CAPITAL))),
+    // 本金上限 1 万亿（与 UI 输入上限一致），防止备份/手写 JSON 传入 1e19
+    capital: Math.min(1e12, Math.max(1000, Math.round(toNum(r.capital, DEFAULT_CAPITAL)))),
     holdings,
     entry,
     note: String(r.note ?? '').slice(0, 120),

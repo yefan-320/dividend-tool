@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js",
+    "check": "node tools/check-static.mjs",
+    "verify": "node --test test/*.test.js && node tools/check-static.mjs && node tools/audit-app.mjs",
     "smoke": "node tools/smoke-all.mjs",
     "shot": "node tools/shot.js",
     "perf": "node tools/perf.mjs",
+    "perf:boot": "node tools/perf-boot.mjs",
     "audit": "node tools/audit-app.mjs",
     "fetch": "node tools/fetch-data.mjs all",
     "fetch:daily": "node tools/fetch-daily.mjs",

@@ -233,6 +233,7 @@
 .bt-chip { height: 26px; padding: 0 11px; border: 1px solid var(--line); border-radius: 13px; background: transparent; color: var(--text-2); font-size: 11px; cursor: pointer; }
 .bt-chip:hover { color: var(--text); border-color: var(--line-strong); }
 .bt-chip.on { background: var(--accent); border-color: transparent; color: #17120a; font-weight: 650; }
+[data-theme="light"] .bt-chip.on { color: #fff; }
 .bt-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; margin-top: 14px; background: var(--surface); }
 .bt-metric { padding: 12px 13px 11px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; }
 .bt-metric:hover { background: var(--surface-2); }

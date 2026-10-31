@@ -21,18 +21,48 @@ export function defaultTxs() {
   ];
 }
 
+const isIsoDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && Number.isFinite(Date.parse(s + 'T00:00:00'));
+
+/** 单条交易归一化：脏字段（负股数/字符串价格/未来格式日期/非法代码）直接丢弃 */
+function normalizeTx(t) {
+  if (!t || typeof t !== 'object') return null;
+  const date = String(t.date ?? '');
+  const code = String(t.code ?? '');
+  const shares = Number(t.shares);
+  const price = Number(t.price);
+  if (!isIsoDate(date) || !/^\d{6}$/.test(code) || !(shares > 0) || !(price > 0)) return null;
+  const fee = Number(t.fee);
+  return {
+    id: typeof t.id === 'string' && t.id ? t.id : 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    date,
+    code,
+    side: t.side === 'sell' ? 'sell' : 'buy',
+    shares,
+    price,
+    fee: Number.isFinite(fee) && fee >= 0 ? fee : 0,
+    ...(t.name ? { name: String(t.name).slice(0, 20) } : {}),
+  };
+}
+
 export function loadTxs() {
+  const fallback = () => {
+    const init = defaultTxs();
+    try { localStorage.setItem(TX_KEY, JSON.stringify(init)); } catch (e) { /* 存储满/隐私模式 */ }
+    return init;
+  };
   try {
     const raw = localStorage.getItem(TX_KEY);
-    if (raw === null) {
-      const init = defaultTxs();
-      localStorage.setItem(TX_KEY, JSON.stringify(init));
-      return init;
-    }
+    if (raw === null) return fallback();
     const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
+    if (!Array.isArray(arr)) return fallback();
+    const clean = arr.map(normalizeTx).filter(Boolean);
+    // 脏数据自动修复回 localStorage（结构/字段级），避免用户以为看到的是自己的数据
+    if (clean.length !== arr.length || JSON.stringify(clean) !== JSON.stringify(arr)) {
+      try { localStorage.setItem(TX_KEY, JSON.stringify(clean)); } catch (e) { /* 存储满 */ }
+    }
+    return clean;
   } catch {
-    return defaultTxs();
+    return fallback();
   }
 }
 
@@ -63,14 +93,17 @@ export function loadCash() {
   const raw = localStorage.getItem(CASH_KEY);
   if (raw !== null) {
     const v = Number(raw);
-    if (Number.isFinite(v) && v >= 0) return v;
+    if (Number.isFinite(v) && v >= 0) return Math.min(1e12, v);
   }
   localStorage.setItem(CASH_KEY, '200000');
   return 200000;
 }
 
 export function saveCash(v) {
-  localStorage.setItem(CASH_KEY, String(v));
+  const n = Number(v);
+  const safe = Number.isFinite(n) ? Math.min(1e12, Math.max(0, n)) : 0;
+  localStorage.setItem(CASH_KEY, String(safe));
+  return safe;
 }
 
 /** 把任意代码变成可读的交易行（给表单回显） */
@@ -91,10 +124,18 @@ export function loadPlans() {
   try {
     const raw = localStorage.getItem(PLAN_KEY);
     const arr = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(arr)) return [];
-    // 旧版方案只有 {id,name,holdings,createdAt}，这里统一补齐 capital / entry
-    return arr.map(normalizePlan).filter((p) => p.id);
+    if (!Array.isArray(arr)) { localStorage.setItem(PLAN_KEY, '[]'); return []; }
+    const list = arr
+      .filter((x) => x && typeof x === 'object')
+      .map(normalizePlan)
+      .filter((p) => p.id);
+    // 坏条目 / 需要归一化的旧方案顺手写回，避免每次加载重复处理脏数据
+    if (list.length !== arr.length || JSON.stringify(list) !== JSON.stringify(arr)) {
+      try { localStorage.setItem(PLAN_KEY, JSON.stringify(list)); } catch (e) { /* 存储满 */ }
+    }
+    return list;
   } catch {
+    try { localStorage.setItem(PLAN_KEY, '[]'); } catch (e) { /* 存储满/隐私模式 */ }
     return [];
   }
 }
@@ -154,8 +195,16 @@ const WATCH_KEY = 'd3:watch';
 export function loadWatch() {
   try {
     const arr = JSON.parse(localStorage.getItem(WATCH_KEY) || '[]');
-    return Array.isArray(arr) ? arr.filter((c) => /^\d{6}$/.test(c)) : [];
+    // 只保留字符串形式的 6 位代码并去重（数字 123456 之类旧脏数据会被清掉）
+    const clean = Array.isArray(arr)
+      ? [...new Set(arr.filter((c) => typeof c === 'string' && /^\d{6}$/.test(c)))]
+      : [];
+    if (!Array.isArray(arr) || clean.length !== arr.length) {
+      try { localStorage.setItem(WATCH_KEY, JSON.stringify(clean)); } catch (e) { /* 存储满 */ }
+    }
+    return clean;
   } catch {
+    try { localStorage.setItem(WATCH_KEY, '[]'); } catch (e) { /* 存储满/隐私模式 */ }
     return [];
   }
 }
@@ -185,8 +234,16 @@ export function loadSettings() {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return { ...def };
     const j = JSON.parse(raw);
-    return { ...def, ...(j && typeof j === 'object' ? j : {}) };
+    const st = { ...def, ...(j && typeof j === 'object' ? j : {}) };
+    // 旧版可能存过负数/超大月支出：读取时归一到合法区间并写回（100 元/月 – 1000 万元/月）
+    const exp = Number(st.expense);
+    st.expense = Number.isFinite(exp) && exp >= 100 && exp <= 1e7 ? Math.round(exp) : def.expense;
+    if (st.expense !== exp) {
+      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(st)); } catch (e) { /* 存储满 */ }
+    }
+    return st;
   } catch {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(def)); } catch (e) { /* 存储满/隐私模式 */ }
     return { ...def };
   }
 }

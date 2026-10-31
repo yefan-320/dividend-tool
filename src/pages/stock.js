@@ -167,7 +167,7 @@ export function bindStock() {
   const draw = (range) => {
     const el = document.getElementById('klineChart');
     if (!el) return;
-    const ch = echarts.getInstanceByDom(el);
+    const ch = window.echarts?.getInstanceByDom(el);
     if (ch) ch.dispose();
     let list = rows;
     if (range && range !== 'all') {

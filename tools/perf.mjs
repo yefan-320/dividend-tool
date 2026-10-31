@@ -58,6 +58,9 @@ async function measure(hash, { cold = false } = {}) {
       totalKB: Math.round(size(()=>true)/1024),
       dataKB: Math.round(size(r=>r.name.includes('/data/'))/1024),
       jsKB: Math.round(size(r=>r.name.includes('/src/')||r.name.includes('echarts'))/1024),
+      appKB: Math.round(size(r=>r.name.includes('/src/')&&!r.name.includes('echarts'))/1024),
+      echartsKB: Math.round(size(r=>r.name.includes('echarts'))/1024),
+      echartsLoaded: res.some(r=>r.name.includes('echarts')),
       coreMs: marks['d3-core-done'] ?? null,
       dataMs: (marks['d3-core-end'] && marks['d3-core-start']) ? marks['d3-core-end'] - marks['d3-core-start'] : null,
       renderMs: marks['d3-first-render'] ?? null,
@@ -77,7 +80,7 @@ const pages = [
 ];
 
 const out = [];
-console.log('页面      冷加载(ms)  热加载(ms)  首屏渲染(ms)  核心数据(ms)  数据加载(ms)  数据(KB)  JS(KB)  DOM节点  FCP(ms)');
+console.log('页面      冷加载(ms)  热加载(ms)  首屏渲染(ms)  核心数据(ms)  数据加载(ms)  数据(KB)  JS(KB)  应用JS(KB)  ECharts(KB)  DOM节点  FCP(ms)');
 for (const [name, hash] of pages) {
   const cold = await measure(hash, { cold: true });
   await sleep(1200);
@@ -88,9 +91,12 @@ for (const [name, hash] of pages) {
     String(cold.ready).padStart(9), String(warm.ready).padStart(9),
     String(warm.renderMs ?? '-').padStart(10), String(warm.coreMs ?? '-').padStart(8),
     String(warm.dataMs ?? '-').padStart(8), (warm.dataKB).toString().padStart(9),
-    (warm.jsKB).toString().padStart(7), String(warm.dom).padStart(8), String(warm.fcp).padStart(7),
+    (warm.jsKB).toString().padStart(7), (warm.appKB).toString().padStart(9),
+    String(warm.echartsLoaded ? warm.echartsKB : 0).padStart(9),
+    String(warm.dom).padStart(8), String(warm.fcp).padStart(7),
   );
 }
+console.log('\n说明：ECharts 已改为按需加载 —— 今天/选股/我的应为 0KB，个股/回测首次进页才加载。');
 const fs = await import('node:fs');
 const path = await import('node:path');
 const { fileURLToPath } = await import('node:url');

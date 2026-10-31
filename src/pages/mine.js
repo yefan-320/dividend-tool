@@ -161,11 +161,11 @@ function settingsView() {
     <div class="panel-body">
       <div class="settings-row">
         <div><div class="settings-k">月支出</div><div class="settings-s">用于回测的「月覆盖」：年分红 ÷ 12 ÷ 月支出</div></div>
-        <div class="settings-in"><input class="input" id="setExpense" type="number" step="500" min="0" value="${Number(st.expense) || 4000}"><em>元/月</em></div>
+        <div class="settings-in"><input class="input" id="setExpense" type="number" step="500" min="100" max="10000000" value="${Number(st.expense) || 4000}"><em>元/月</em></div>
       </div>
       <div class="settings-row">
         <div><div class="settings-k">期初现金</div><div class="settings-s">「我的组合」与回测「用当前市值」会用这笔现金</div></div>
-        <div class="settings-in"><input class="input" id="setCash" type="number" step="10000" min="0" value="${Math.round(cash)}"><em>元</em></div>
+        <div class="settings-in"><input class="input" id="setCash" type="number" step="10000" min="0" max="1000000000000" value="${Math.round(cash)}"><em>元</em></div>
       </div>
       <div class="settings-row">
         <div><div class="settings-k">行情更新</div><div class="settings-s">打开页面会自动在后台拉一次全市场行情；也可以手动刷新（失败自动用本地快照）</div></div>
@@ -323,9 +323,27 @@ export function bindMine() {
   }
 
   const expense = document.getElementById('setExpense');
-  if (expense) expense.onchange = () => { saveSettings({ expense: Number(expense.value) || 0 }); toast('月支出已保存'); };
+  if (expense) {
+    expense.onchange = () => {
+      const raw = Number(expense.value);
+      const v = Math.min(1e7, Math.max(100, Math.round(Number.isFinite(raw) ? raw : 4000)));
+      if (v !== raw) toast('月支出需在 100 元–1000 万元/月之间，已按 ' + v + ' 保存');
+      else toast('月支出已保存');
+      expense.value = v;
+      saveSettings({ expense: v });
+    };
+  }
   const cash = document.getElementById('setCash');
-  if (cash) cash.onchange = () => { saveCash(Math.max(0, Number(cash.value) || 0)); toast('期初现金已保存'); };
+  if (cash) {
+    cash.onchange = () => {
+      const raw = Number(cash.value);
+      const v = Math.min(1e12, Math.max(0, Math.round(Number.isFinite(raw) ? raw : 0)));
+      if (v !== raw) toast('期初现金需在 0–1 万亿元之间，已按 ' + v + ' 保存');
+      else toast('期初现金已保存');
+      cash.value = v;
+      saveCash(v);
+    };
+  }
   const exp = document.getElementById('setExport');
   if (exp) {
     exp.onclick = () => {
