@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(__dirname, '../../report/design');
+fs.mkdirSync(OUT, { recursive: true });
+fs.mkdirSync(path.resolve(OUT, '..'), { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BASE = 'http://127.0.0.1:8766/?theme=dark&nosw=1';
 let bust = 0;

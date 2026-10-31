@@ -19,3 +19,13 @@ jobs:
         run: node tools/check-static.mjs
       - name: 数据体检（覆盖/一致性/引擎自检）
         run: node tools/audit-app.mjs
+      - name: 浏览器冒烟（36 项，本地静态服务 + 无头 Chrome）
+        run: |
+          mkdir -p ../report/design
+          python3 -m http.server 8766 --bind 127.0.0.1 >/tmp/http.log 2>&1 &
+          sleep 1
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)
+          echo "chrome=$CHROME"
+          "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --disable-crash-reporter --remote-debugging-port=9222 --user-data-dir=/tmp/d3-chrome about:blank >/tmp/chrome.log 2>&1 &
+          for i in $(seq 1 30); do curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null && break; sleep 1; done
+          node tools/smoke-all.mjs
