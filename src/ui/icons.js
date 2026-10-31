@@ -18,7 +18,11 @@ const P = {
   download: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 20h16"/>',
   upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 20h16"/>',
   external: '<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
-  dot: '<circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/>'
+  dot: '<circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M6 15H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1"/>',
+  trash: '<path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/>',
+  arrowLeft: '<path d="M20 12H4"/><path d="m10 6-6 6 6 6"/>',
+  layers: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/><path d="m3 17 9 5 9-5"/>'
 };
 
 export function icon(name, cls = '') {

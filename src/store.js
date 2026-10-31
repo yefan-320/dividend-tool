@@ -3,6 +3,7 @@
  * 记录结构 {id,date,code,side,shares,price,fee}
  */
 import { quote, nameOf } from './data.js';
+import { normalizePlan, makePlan } from './engine/plan.js';
 
 const TX_KEY = 'd3:txs';
 const CASH_KEY = 'd3:cash';
@@ -83,34 +84,68 @@ export function describeTx(tx) {
 }
 
 
-/* ---------------- 组合方案（回测用：一组代码 + 目标权重） ---------------- */
+/* ---------------- 组合方案（一套代码 + 目标权重 + 建仓节奏） ---------------- */
 const PLAN_KEY = 'd3:plans';
 
 export function loadPlans() {
   try {
     const raw = localStorage.getItem(PLAN_KEY);
     const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
+    if (!Array.isArray(arr)) return [];
+    // 旧版方案只有 {id,name,holdings,createdAt}，这里统一补齐 capital / entry
+    return arr.map(normalizePlan).filter((p) => p.id);
   } catch {
     return [];
   }
 }
 
 export function savePlans(list) {
-  localStorage.setItem(PLAN_KEY, JSON.stringify(list));
+  localStorage.setItem(PLAN_KEY, JSON.stringify((list || []).map(normalizePlan).filter((p) => p.id)));
 }
 
-export function savePlan(name, holdings) {
+/**
+ * 保存方案：有 id 就更新，没有就新增。
+ * 兼容旧签名 savePlan(name, holdings)。
+ * @returns {object} 保存后的方案
+ */
+export function savePlan(planOrName, holdings) {
   const list = loadPlans();
-  list.push({ id: 'p' + Date.now().toString(36), name, holdings, createdAt: new Date().toISOString().slice(0, 10) });
+  let plan;
+  if (typeof planOrName === 'string') {
+    plan = makePlan({ name: planOrName, holdings: holdings || [] });
+  } else {
+    plan = normalizePlan(planOrName);
+    if (!plan.id) plan.id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  }
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  plan.updatedAt = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const i = list.findIndex((p) => p.id === plan.id);
+  if (i >= 0) list[i] = plan; else list.push(plan);
   savePlans(list);
-  return list;
+  return plan;
 }
 
 export function removePlan(id) {
   const list = loadPlans().filter((p) => p.id !== id);
   savePlans(list);
   return list;
+}
+
+/** 复制方案（名称加「副本」，序号递增，避免重名） */
+export function duplicatePlan(id) {
+  const list = loadPlans();
+  const src = list.find((p) => p.id === id);
+  if (!src) return null;
+  const base = src.name.replace(/ · 副本\d*$/, '');
+  let name = `${base} · 副本`;
+  let n = 1;
+  while (list.some((p) => p.name === name)) { n++; name = `${base} · 副本${n}`; }
+  const copy = makePlan({ ...src, id: '', name: name.slice(0, 20) });
+  copy.id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  list.push(copy);
+  savePlans(list);
+  return copy;
 }
 
 /* ---------------- 自选 ---------------- */

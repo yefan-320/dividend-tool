@@ -1,13 +1,13 @@
 import { portfolioStats } from '../engine/portfolio.js';
-import { db, quote, nameOf, currentDy, divSummary, dataMeta } from '../data.js';
+import { db, quote, currentDy, divSummary, dataMeta } from '../data.js';
 import {
-  loadTxs, loadCash, saveCash, loadPlans, savePlan, removePlan, loadSettings, saveSettings,
+  loadTxs, loadCash, saveCash, loadSettings, saveSettings,
 } from '../store.js';
-import { btState } from './backtest.js';
+import { plansView, bindPlans } from './plans.js';
 import { icon } from '../ui/icons.js';
 import { esc, num, money, wan, pct, pctSign, upDown } from '../ui/format.js';
 import { toast } from '../ui/toast.js';
-import { confirmDialog, promptDialog } from '../ui/modal.js';
+import { confirmDialog } from '../ui/modal.js';
 
 const today = () => db.generated || '2026-10-30';
 
@@ -150,54 +150,6 @@ function addForm() {
   </section>`;
 }
 
-/* ---------------- 组合方案 ---------------- */
-
-function planRows() {
-  return loadPlans();
-}
-
-function weightOfHoldings() {
-  const txs = loadTxs();
-  const pos = new Map();
-  for (const t of txs) if (t.side !== 'sell') pos.set(t.code, (pos.get(t.code) || 0) + Number(t.shares || 0));
-  const cash = loadCash();
-  let total = cash;
-  const vals = [];
-  for (const [code, shares] of pos) {
-    const v = (quote(code)?.p || 0) * shares;
-    vals.push({ code, v });
-    total += v;
-  }
-  return vals.map((x) => ({ code: x.code, weight: total > 0 ? Math.round((x.v / total) * 1000) / 10 : 0 }));
-}
-
-function plansView() {
-  const plans = planRows();
-  const rows = plans.map((p) => {
-    const holdings = (p.holdings || []).map((h) => `<span class="plan-tag">${esc(nameOf(h.code))} <b>${num(h.weight, 1)}%</b></span>`).join('');
-    return `<div class="plan-card">
-      <div class="plan-head">
-        <div><span class="plan-name">${esc(p.name)}</span><span class="plan-date">${esc(p.createdAt || '')}</span></div>
-        <div class="plan-ops">
-          <button class="btn sm ghost" data-plan-bt="${esc(p.id)}">用此方案回测</button>
-          <button class="btn sm ghost danger-text" data-plan-del="${esc(p.id)}">删除</button>
-        </div>
-      </div>
-      <div class="plan-tags">${holdings || '<span class="muted">空方案</span>'}</div>
-    </div>`;
-  }).join('');
-  return `<section class="panel fade-in">
-    <div class="panel-head"><span class="panel-title">组合方案</span><span class="section-note">一套代码 + 目标权重 · 回测页可直接选用</span></div>
-    <div class="panel-body">
-      <div class="row" style="gap:8px;margin-bottom:12px">
-        <button class="btn primary" id="planCreate">${icon('plus')} 用当前持仓新建方案</button>
-        <span class="section-note">权重 = 当前持仓市值占比（含现金部分会自动留现金）</span>
-      </div>
-      ${rows || '<div class="empty-block">还没有方案。建一个之后，回测页「组合」下拉框里就能切。</div>'}
-    </div>
-  </section>`;
-}
-
 /* ---------------- 设置 ---------------- */
 
 function settingsView() {
@@ -313,6 +265,8 @@ export function bindMine() {
     b.onclick = () => { mineState.view = b.dataset.mview; syncMineUrl(); rerender(); };
   });
 
+  if (mineState.view === 'plans') { bindPlans(); return; }
+
   // 总账：添加/删除/重置
   const addBtn = document.getElementById('addTxBtn');
   if (addBtn) {
@@ -352,36 +306,6 @@ export function bindMine() {
       rerender();
     };
   }
-
-  // 方案
-  const createPlan = document.getElementById('planCreate');
-  if (createPlan) {
-    createPlan.onclick = async () => {
-      const name = await promptDialog({ title: '新建组合方案', label: '方案名称', value: '我的方案', placeholder: '例如：红利五虎' });
-      if (!name) return;
-      const holdings = weightOfHoldings();
-      if (!holdings.length) return toast('当前组合还没有持仓，先添加买入记录');
-      savePlan(name.slice(0, 20), holdings);
-      toast('方案已保存');
-      rerender();
-    };
-  }
-  document.querySelectorAll('[data-plan-bt]').forEach((b) => {
-    b.onclick = () => {
-      btState.planId = b.dataset.planBt;
-      btState.mode = 'port';
-      location.hash = 'backtest';
-    };
-  });
-  document.querySelectorAll('[data-plan-del]').forEach((b) => {
-    b.onclick = async () => {
-      const ok = await confirmDialog({ title: '删除这个方案？', message: '只删除方案本身，不影响当前持仓。', okLabel: '删除', danger: true });
-      if (!ok) return;
-      removePlan(b.dataset.planDel);
-      toast('方案已删除');
-      rerender();
-    };
-  });
 
   // 设置：行情刷新
   const refreshBtn = document.getElementById('refreshQuotesBtn');

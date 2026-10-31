@@ -1,13 +1,13 @@
 /* 红利工具 Service Worker：应用外壳预缓存 + 数据 stale-while-revalidate。
    代码更新时把 VERSION 加一即可让旧缓存失效。 */
-const VERSION = 'd3-v1';
+const VERSION = 'd3-v2';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './styles/tokens.css', './styles/base.css', './styles/components.css', './styles/pages.css',
   './vendor/echarts.min.js',
   './src/main.js', './src/data.js', './src/net.js', './src/store.js', './src/charts.js',
-  './src/pages/today.js', './src/pages/scan.js', './src/pages/stock.js', './src/pages/backtest.js', './src/pages/mine.js',
-  './src/engine/finance.js', './src/engine/portfolio.js', './src/engine/market.js',
+  './src/pages/today.js', './src/pages/scan.js', './src/pages/stock.js', './src/pages/backtest.js', './src/pages/mine.js', './src/pages/plans.js',
+  './src/engine/plan.js', './src/engine/finance.js', './src/engine/portfolio.js', './src/engine/market.js',
   './src/engine/portfolioBacktest.js', './src/engine/stockBacktest.js', './src/engine/backtest.js', './src/engine/verdict.js',
   './src/ui/icons.js', './src/ui/format.js', './src/ui/toast.js', './src/ui/modal.js', './src/ui/buy.js',
   './assets/icon-192.png', './assets/icon-512.png',

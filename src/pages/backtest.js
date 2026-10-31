@@ -12,6 +12,7 @@ import { buildSeries, buildTradingDates, monthEnd, priceAt, maxDrawdown } from '
 import { runPortfolioBacktest } from '../engine/portfolioBacktest.js';
 import { runStockBacktest } from '../engine/stockBacktest.js';
 import { runPlanBacktest } from '../engine/backtest.js';
+import { entryLabel } from '../engine/plan.js';
 import { loadTxs, loadCash, loadPlans, savePlan, loadSettings } from '../store.js';
 import {
   drawPortfolioChart, drawCandleChart, drawNavChart, drawDonut, drawWaterfall,
@@ -60,6 +61,8 @@ function structure() {
       return {
         holdings: plan.holdings.map((h) => ({ code: h.code, weight: Number(h.weight) || 0 })),
         lots: [], cash: 0, total: 0, fallback: false, name: plan.name, plan: true,
+        entry: plan.entry || { mode: 'once' }, capital: Number(plan.capital) || 0,
+        cashPct: Math.max(0, 100 - plan.holdings.reduce((acc, h) => acc + (Number(h.weight) || 0), 0)),
       };
     }
   }
@@ -457,6 +460,7 @@ function renderPort(market, structureData) {
     mode: useReplay ? 'replay' : 'invest',
     lots: structureData.lots,
     cash0: useReplay ? structureData.cash : 0,
+    entry: structureData.entry || { mode: 'once' },
     benchmarkSeries: ctx.benchRows,
     lowVolSeries: ctx.lowVolRows,
   });
@@ -501,9 +505,9 @@ function renderPort(market, structureData) {
   return `
   ${paramBar({ useMktCap: !useReplay })}
   ${hero({
-    kicker: `组合回测 · ${structureData.name || '当前持仓'} · ${useReplay ? '持仓回放（当前股数，假设自起点持有）' : '投入回测（本金按目标结构买入）'} · ${from} → ${to} · ${num(s.years, 1)} 年`,
+    kicker: `组合回测 · ${structureData.name || '当前持仓'} · ${useReplay ? '持仓回放（当前股数，假设自起点持有）' : '投入回测（本金按目标结构买入）'}${structureData.plan ? ' · ' + entryLabel(structureData.entry) : ''} · ${from} → ${to} · ${num(s.years, 1)} 年`,
     main: `组合 <b class="num gold">${retTxt}</b> <span class="thin">，年化 ${pctSign(s.cagr == null ? null : s.cagr * 100, 1)} · 基准 ${pctSign(s.benchCagr == null ? null : s.benchCagr * 100, 1)}</span>`,
-    desc: `期末 ${endW.toFixed(0)} 万（${useReplay ? '起点' : '投入'} ${(r.totalIn / 10000).toFixed(0)} 万）· 最大回撤 ${pct(s.mdd * 100, 1)}（基准 ${pct(s.benchMdd == null ? null : s.benchMdd * 100, 1)}）· 总分红 ${(totalDiv / 10000).toFixed(1)} 万 · ${structureData.plan ? '结构 = 方案「' + esc(structureData.name) + '」' : structureData.fallback ? '账本为空，按演示持仓等权' : '结构 = 当前组合市值权重（股票 ' + (100 - cashPctOf(structureData)).toFixed(0) + '% + 现金 ' + cashPctOf(structureData).toFixed(0) + '%）'}`,
+    desc: `期末 ${endW.toFixed(0)} 万（${useReplay ? '起点' : '投入'} ${(r.totalIn / 10000).toFixed(0)} 万）· 最大回撤 ${pct(s.mdd * 100, 1)}（基准 ${pct(s.benchMdd == null ? null : s.benchMdd * 100, 1)}）· 总分红 ${(totalDiv / 10000).toFixed(1)} 万 · ${structureData.plan ? '结构 = 方案「' + esc(structureData.name) + '」 · 建仓 = ' + esc(entryLabel(structureData.entry)) + ' · 现金 ' + structureData.cashPct.toFixed(0) + '%' : structureData.fallback ? '账本为空，按演示持仓等权' : '结构 = 当前组合市值权重（股票 ' + (100 - cashPctOf(structureData)).toFixed(0) + '% + 现金 ' + cashPctOf(structureData).toFixed(0) + '%）'}`,
     stats: [
       { k: '累计收益', v: retTxt, cls: vc, s: hasAdd ? '扣追加资金' : '起点本金' },
       { k: '年化', v: pctSign(s.cagr == null ? null : s.cagr * 100, 1), cls: vc, s: hasAdd ? 'XIRR 资金加权' : '复利折算' },
@@ -734,7 +738,11 @@ function readBtUrl() {
   const code = qs.get('code');
   if (/^\d{6}$/.test(code || '')) btState.stock = code;
   const plan = qs.get('plan');
-  if (plan) btState.planId = plan;
+  if (plan) {
+    btState.planId = plan;
+    const hit = loadPlans().find((p) => p.id === plan);
+    if (hit && Number(hit.capital) > 0) btState.capital = Math.round(Number(hit.capital) / 10000) * 10000;
+  }
 }
 
 export async function renderBacktest() {
@@ -850,14 +858,27 @@ export function bindBacktest() {
   const run = document.getElementById('btRun');
   if (run) run.onclick = () => readParams();
   const planSel = document.getElementById('btPlan');
-  if (planSel) planSel.onchange = () => { btState.planId = planSel.value; if (btState.planId !== 'current') btState.portMode = 'invest'; rerender(); };
+  if (planSel) planSel.onchange = () => {
+    btState.planId = planSel.value;
+    if (btState.planId !== 'current') {
+      btState.portMode = 'invest';
+      const hit = loadPlans().find((p) => p.id === btState.planId);
+      if (hit && Number(hit.capital) > 0) btState.capital = Math.round(Number(hit.capital) / 10000) * 10000;
+    }
+    rerender();
+  };
   const saveBtn = document.getElementById('btSavePlan');
   if (saveBtn) saveBtn.onclick = () => {
     const name = window.prompt('方案名称（例如：红利五虎）', '我的方案');
     if (!name) return;
     const st = ctx.structure;
-    savePlan(name.slice(0, 20), st.holdings.map((h) => ({ code: h.code, weight: Math.round(h.weight * 10) / 10 })));
-    btState.planId = loadPlans().at(-1)?.id || 'current';
+    const saved = savePlan({
+      name: name.slice(0, 20),
+      capital: btState.capital,
+      holdings: st.holdings.map((h) => ({ code: h.code, weight: Math.round(h.weight * 10) / 10 })),
+      entry: { mode: 'once' },
+    });
+    btState.planId = saved?.id || 'current';
     rerender();
   };
   const useCap = document.getElementById('btUseMktCap');

@@ -5,6 +5,18 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// 截图用的演示方案（不依赖浏览器里已有的数据；截完不动用户数据，因为只写 d3:plans 一次）
+const DEMO_PLAN = JSON.stringify([{
+  id: 'demo-plan', name: '红利五虎', capital: 1000000,
+  holdings: [
+    { code: '600036', weight: 20 }, { code: '601398', weight: 20 }, { code: '601318', weight: 15 },
+    { code: '600887', weight: 15 }, { code: '601088', weight: 15 }, { code: '600900', weight: 15 },
+  ],
+  entry: { mode: 'staged', months: 12, minDy: 5.5 },
+  createdAt: '2026-11-01', updatedAt: '2026-11-01',
+}]);
+const seedPlans = `localStorage.setItem('d3:plans', ${JSON.stringify(DEMO_PLAN)});`;
+
 const scenes = [
   { name: 'today-desktop', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=1#today', w: 1280, h: 900, wait: 4000 },
   { name: 'scan-desktop', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=2#scan', w: 1280, h: 1000, wait: 7500 },
@@ -15,13 +27,22 @@ const scenes = [
   { name: 'backtest-stock-desktop', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=7#backtest?mode=stock&code=601398', w: 1280, h: 1000, wait: 8000 },
   { name: 'backtest-cmp-desktop', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=8#backtest?mode=cmp', w: 1280, h: 1000, wait: 9000 },
   { name: 'mine-desktop', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=9#mine', w: 1280, h: 1000, wait: 4500 },
-  { name: 'mine-plans-desktop', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=10#mine?view=plans', w: 1280, h: 1000, wait: 4500 },
+  { name: 'mine-plans-desktop', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=10#mine?view=plans', w: 1280, h: 1000, wait: 4500,
+    act: seedPlans + "location.hash='#mine?view=plans&s=1';", after: 1600 },
+  { name: 'mine-plans-editor-desktop', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=18#mine?view=plans', w: 1280, h: 1100, wait: 4500,
+    act: seedPlans + "location.hash='#mine?view=plans&mode=edit&plan=demo-plan';", after: 1600 },
+  { name: 'mine-plans-detail-desktop', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=19#mine?view=plans', w: 1280, h: 1100, wait: 4500,
+    act: seedPlans + "location.hash='#mine?view=plans&mode=detail&plan=demo-plan';", after: 1800 },
   { name: 'mine-settings-desktop', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=11#mine?view=settings', w: 1280, h: 1000, wait: 4500 },
   { name: 'today-mobile', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=12#today', w: 390, h: 844, wait: 4000 },
   { name: 'scan-mobile', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=13#scan', w: 390, h: 844, wait: 7500 },
   { name: 'stock-mobile', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=14#stock?code=600036', w: 390, h: 844, wait: 5000 },
   { name: 'backtest-mobile', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=15#backtest', w: 390, h: 844, wait: 8000 },
   { name: 'mine-mobile', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=16#mine', w: 390, h: 844, wait: 4500 },
+  { name: 'mine-plans-mobile', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=20#mine?view=plans', w: 390, h: 900, wait: 4500,
+    act: seedPlans + "location.hash='#mine?view=plans&s=1';", after: 1600 },
+  { name: 'mine-plans-detail-mobile', url: 'http://127.0.0.1:8766/?theme=dark&nosw=1&t=21#mine?view=plans', w: 390, h: 900, wait: 4500,
+    act: seedPlans + "location.hash='#mine?view=plans&mode=detail&plan=demo-plan';", after: 1800 },
   { name: 'today-light', url: 'http://127.0.0.1:8766/?theme=light&nosw=1&t=17#today', w: 1280, h: 900, wait: 4000 }
 ];
 

@@ -7,20 +7,22 @@ import { esc } from './format.js';
 
 /**
  * @param {string} code
- * @param {{onDone?:Function}} [opts]
+ * @param {{onDone?:Function, shares?:number, price?:number, note?:string}} [opts]
+ *   shares/price 用来预填（执行清单「记一笔」会带上建议股数）
  */
 export function openBuyModal(code, opts = {}) {
   const q = quote(code);
   const name = nameOf(code);
-  const price = q?.p ?? 0;
+  const price = opts.price > 0 ? opts.price : (q?.p ?? 0);
+  const shares = opts.shares > 0 ? opts.shares : 1000;
   const today = db.generated || new Date().toISOString().slice(0, 10);
   openModal({
     title: `买入 ${name}`,
     body: `<div class="modal-form">
       <label class="modal-field"><span>日期</span><input class="input" id="buyDate" type="date" value="${esc(today)}" max="${esc(today)}"></label>
-      <label class="modal-field"><span>股数（建议 100 的整数倍）</span><input class="input" id="buyShares" type="number" step="100" min="1" value="1000"></label>
+      <label class="modal-field"><span>股数（建议 100 的整数倍）</span><input class="input" id="buyShares" type="number" step="100" min="1" value="${shares}"></label>
       <label class="modal-field"><span>成本价</span><input class="input" id="buyPrice" type="number" step="0.01" min="0.01" value="${price || ''}"></label>
-      <div class="modal-hint">当前价 ${price ? price.toFixed(2) : '—'} · 代码 ${esc(code)} · 只存本地，不上传</div>
+      <div class="modal-hint">当前价 ${price ? price.toFixed(2) : '—'} · 代码 ${esc(code)} · 只存本地，不上传${opts.note ? ` · ${esc(opts.note)}` : ''}</div>
     </div>`,
     actions: [
       { label: '取消', kind: 'ghost' },
