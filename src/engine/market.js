@@ -1,3 +1,5 @@
+import { xirr as financeXirr } from './finance.js';
+
 /**
  * 市场数据适配（纯函数）：把日 K + 月线拼成「按日期可查」的序列。
  *
@@ -182,25 +184,12 @@ export function sharpeOf(rows, riskFree = 0.02) {
   return ((mean * 252 - riskFree) / (sd * Math.sqrt(252)));
 }
 
-/** XIRR（现金流资金加权年化） */
+/**
+ * XIRR（现金流资金加权年化）。输入沿用回测内部的 [[date, amount], ...] 形式，
+ * 口径与 engine/finance.js 的 xirr([{date, amount}]) 完全一致（过滤非法流、无解返回 null）。
+ */
 export function xirr(flows) {
-  if (!flows || flows.length < 2) return null;
-  const t0 = Date.parse(flows[0][0]);
-  const ts = flows.map(([d, a]) => [(Date.parse(d) - t0) / 86400000 / 365.25, a]);
-  let r = 0.1;
-  for (let i = 0; i < 80; i++) {
-    let f = 0;
-    let df = 0;
-    for (const [x, a] of ts) {
-      const p = Math.pow(1 + r, x);
-      f += a / p;
-      df += (-x * a) / (p * (1 + r));
-    }
-    if (df === 0) break;
-    const nr = r - f / df;
-    if (!Number.isFinite(nr) || nr <= -1) break;
-    if (Math.abs(nr - r) < 1e-9) { r = nr; break; }
-    r = nr;
-  }
-  return r;
+  if (!Array.isArray(flows) || flows.length < 2) return null;
+  const objFlows = flows.map((f) => (Array.isArray(f) ? { date: f[0], amount: f[1] } : f));
+  return financeXirr(objFlows);
 }
