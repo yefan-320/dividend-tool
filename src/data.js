@@ -21,6 +21,7 @@ export const db = {
   finance: null,    // {code:[eps,roe,nm,liab,ocfps,np]} 最近年报
   finYear: null,
   finHistory: null, // {code:[[year,eps,roe,nm,liab,ocfps],...]}
+  financeExtraLoaded: false, // 个股页按需加载的净利率/负债率/净利润是否已合并
   generated: '',
 };
 
@@ -30,6 +31,18 @@ async function getJson(f) {
   return res.json();
 }
 
+/** 核心财务 [eps,roe,ocfps] → 统一 6 槽数组；兼容旧的 finance-current 6 槽格式 */
+function hydrateFinance(data) {
+  const out = {};
+  for (const [code, a] of Object.entries(data || {})) {
+    if (!Array.isArray(a)) continue;
+    out[code] = a.length >= 6
+      ? a
+      : [a[0] ?? null, a[1] ?? null, null, null, a[2] ?? null, null];
+  }
+  return out;
+}
+
 export async function loadCore() {
   if (db.ready) return db;
   performance.mark?.('d3-core-start');
@@ -37,17 +50,43 @@ export async function loadCore() {
     getJson('quotes.json'),
     getJson('baseline.json'),
     getJson('benchmark.json'),
-    getJson('finance-current.json').catch(() => ({ year: null, data: {} })),
+    // 首屏只要 eps/roe/ocfps（质量闸门），净利润/净利率/负债率由个股页按需加载
+    getJson('finance-core.json').catch(() => getJson('finance-current.json').catch(() => ({ year: null, data: {} }))),
   ]);
   db.quotes = quotes.quotes || {};
   db.generated = quotes.generated || '';
   db.baseline = baseline;
   db.benchmark = benchmark.bench || {};
-  db.finance = finance.data || {};
+  db.finance = hydrateFinance(finance.data);
   db.finYear = finance.year || null;
   db.ready = true;
   performance.mark?.('d3-core-end');
   return db;
+}
+
+/**
+ * 个股页按需加载财务附加字段（净利率/负债率/净利润），合并进 db.finance 后返回。
+ * 失败不抛错：缺失字段页面用「—」兜底。
+ */
+let financeExtraPromise = null;
+export async function loadFinanceExtra() {
+  if (db.financeExtraLoaded) return db.finance;
+  if (!financeExtraPromise) {
+    financeExtraPromise = (async () => {
+      const j = await getJson('finance-extra.json');
+      for (const [code, a] of Object.entries(j.data || {})) {
+        if (!Array.isArray(a)) continue;
+        const row = db.finance[code] || [null, null, null, null, null, null];
+        row[2] = a[0] ?? null;
+        row[3] = a[1] ?? null;
+        row[5] = a[2] ?? null;
+        db.finance[code] = row;
+      }
+      db.financeExtraLoaded = true;
+      return db.finance;
+    })().catch(() => { financeExtraPromise = null; return db.finance; });
+  }
+  return financeExtraPromise;
 }
 
 export async function loadFinanceHistory() {

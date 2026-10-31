@@ -1,4 +1,4 @@
-import { db, loadDaily, loadMonthly, loadDyPct, quote, nameOf, divSummary, dataMeta } from '../data.js';
+import { db, loadDaily, loadMonthly, loadDyPct, loadFinanceExtra, quote, nameOf, divSummary, dataMeta } from '../data.js';
 import { drawCandleChart } from '../charts.js';
 import { isWatched, toggleWatch } from '../store.js';
 import { openBuyModal } from '../ui/buy.js';
@@ -214,6 +214,7 @@ export async function renderStock() {
     return `<div class="page-head"><h1 class="page-title">个股</h1><div class="page-sub">${esc(code)} 没有行情（可能退市/停牌）</div></div>${searchBar()}`;
   }
   const d = divSummary(code);
+  const extraPromise = loadFinanceExtra().catch(() => {});
   const pctData = await loadDyPct().catch(() => ({}));
   const daily = await loadDaily(code);
   let days = daily && daily.cal ? daily.cal.map((d, i) => (daily.c[i] == null ? null : [d, daily.o[i], daily.h[i], daily.l[i], daily.c[i], daily.v[i] || 0])).filter(Boolean) : [];
@@ -227,6 +228,7 @@ export async function renderStock() {
       chartSource = '月线（离线近似）';
     } catch (e) { chartSource = ''; }
   }
+  await extraPromise; // 个股页需要净利率/负债率/净利润（首屏不加载这部分）
   const v = verdict(code, q, d, pctData[code] ?? null);
   const dps = d?.years?.[d.lastY] || 0;
   const high = dps > 0 ? dps / 0.05 : null;

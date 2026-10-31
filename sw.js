@@ -1,6 +1,6 @@
 /* 红利工具 Service Worker：应用外壳预缓存 + 数据 stale-while-revalidate。
    代码更新时把 VERSION 加一即可让旧缓存失效。 */
-const VERSION = 'd3-v4';
+const VERSION = 'd3-v5';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './styles/tokens.css', './styles/base.css', './styles/components.css', './styles/pages.css',
@@ -12,7 +12,7 @@ const SHELL = [
   './src/ui/icons.js', './src/ui/format.js', './src/ui/toast.js', './src/ui/modal.js', './src/ui/buy.js', './src/ui/table.js',
   './assets/icon-192.png', './assets/icon-512.png',
   './data/quotes.json', './data/baseline.json', './data/benchmark.json',
-  './data/finance-current.json', './data/dy-pct.json', './data/index-daily.json',
+  './data/finance-core.json', './data/dy-pct.json', './data/index-daily.json',
   './data/daily/meta.json',
   './data/daily/000333.json', './data/daily/600036.json', './data/daily/600066.json',
   './data/daily/600887.json', './data/daily/600941.json', './data/daily/601318.json', './data/daily/601398.json',

@@ -1,0 +1,21 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 单元测试（含回测差分测试）
+        run: node --test test/*.test.js
+      - name: 静态检查（index/sw/import/manifest/数据引用）
+        run: node tools/check-static.mjs
+      - name: 数据体检（覆盖/一致性/引擎自检）
+        run: node tools/audit-app.mjs

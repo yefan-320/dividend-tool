@@ -81,8 +81,10 @@ python3 -m http.server 8766
 | `data/daily/meta.json` + 7 只演示持仓 | 交易日历 + 演示持仓的日 K（离线兜底）；**其余日 K 按需联网拉取**（腾讯，IndexedDB 缓存） | 2026-10-30 | 腾讯日线 |
 | `data/dy-pct.json` | 股息率分位（预计算，33KB，避免加载 6.5MB 月线） | 派生 | 月线 + 分红 |
 | `data/index-daily.json` | 中证红利全收益 + 低波全收益日线 | 2026-08 | 中证指数 / 理杏仁快照 |
-| `data/baseline.json` | 股票池、年度每股分红 | 2026-08 快照 | 旧快照导入 |
-| `data/finance-current.json` | 5377 只 2025 年报主要指标 | 2025 年报 | 东财数据中心 |
+| `data/baseline.json` | 股票池（名称/行业/市值）、年度每股分红（只保留 `years`，派生字段由前端重算） | 2026-08 快照 | 旧快照导入 + `build-slim-data` 瘦身 |
+| `data/finance-core.json` | 首屏用：5377 只 2025 年报的 eps/ROE/每股经营现金流（质量闸门） | 2025 年报 | 东财 → `build-slim-data` 拆分 |
+| `data/finance-extra.json` | 个股页按需：净利率/负债率/归母净利润（首屏不加载） | 2025 年报 | 同上 |
+| `data/finance-current.json` | 5377 只 2025 年报完整 6 字段（抓取脚本/体检脚本用，页面不再加载） | 2025 年报 | 东财数据中心 |
 | `data/finance-history.json` | 5513 只 2011–2025 年度指标（回测用） | 年度 | 东财数据中心 |
 | `data/benchmark.json` | 中证红利全收益月末点位 | 2012-01 ~ 2026-10 | 中证指数 + 补两月 |
 | `data/index.json` | 中证红利 / 沪深300 / 中证500 月线 | 2026-10 | 腾讯 |
@@ -94,6 +96,7 @@ node tools/fetch-data.mjs all        # 行情 + 月线 + 指数（约 3 分钟�
 node tools/fetch-finance.mjs 2011 2025
 node tools/fetch-daily.mjs --offline-cache   # 可选：想把全市场日 K 落盘当离线缓存时再跑（默认不跑，页面按需联网）
 node tools/build-derivatives.mjs      # 生成 dy-pct.json（分位预计算）
+node tools/build-slim-data.mjs       # 生成 finance-core/extra、瘦身 baseline（fetch-finance 会自动跑）
 node tools/audit-app.mjs              # 数据 + 引擎体检 → ../report/AUDIT-APP.md
 ```
 
@@ -130,6 +133,7 @@ node tools/shot.js             # 界面截图 → ../report/design/
 ```
 
 `npm run verify` = 单测 + 静态检查 + 数据体检（不需要浏览器）；`npm run smoke` / `npm run perf` 需要本地 8766 + Chrome 9222。
+每次 `git push main` 后 GitHub Actions 会自动跑同样三项（`.github/workflows/test.yml`），失败会在仓库 Actions 页提示。
 
 当前结果：
 

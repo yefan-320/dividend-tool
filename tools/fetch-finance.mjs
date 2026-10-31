@@ -11,6 +11,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const DATA = path.join(ROOT, 'data');
@@ -120,3 +121,11 @@ fs.writeFileSync(path.join(DATA, 'finance-current.json'), JSON.stringify(current
 fs.writeFileSync(historyPath, JSON.stringify(history));
 console.log(`current: ${Object.keys(current.data).length} 只 ${(fs.statSync(path.join(DATA, 'finance-current.json')).size / 1e6).toFixed(2)}MB`);
 console.log(`history: ${Object.keys(history.data).length} 只 ${(fs.statSync(historyPath).size / 1e6).toFixed(2)}MB`);
+
+// 同步重新生成首屏拆分文件（finance-core / finance-extra），否则前端会继续用旧数据
+try {
+  execFileSync(process.execPath, [path.join(ROOT, 'tools/build-slim-data.mjs')], { stdio: 'inherit' });
+} catch (e) {
+  console.error('build-slim-data 失败，finance-core/extra 未更新：', e.message);
+  process.exitCode = 1;
+}

@@ -71,6 +71,30 @@ if (abnormal.length > rows.length * 0.02) push('warn', `有 ${abnormal.length} �
 const topAbnormal = abnormal.sort((a, b) => b.dy - a.dy).slice(0, 8);
 stats.topAbnormal = topAbnormal.map((r) => `${r.name}(${r.code}) 股息率 ${r.dy.toFixed(1)}% 分红 ${r.dps} 现价 ${r.price}`);
 
+/* 3.5 数据拆分一致性：finance-core / finance-extra 必须与 finance-current 同覆盖、同口径 */
+try {
+  const core = read('finance-core.json');
+  const extra = read('finance-extra.json');
+  const full = finCur.data || {};
+  const fullCodes = Object.keys(full);
+  const r4 = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 1e4) / 1e4 : null);
+  const r0 = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null);
+  let mismatched = 0;
+  for (const code of fullCodes) {
+    const c = core.data?.[code];
+    const e = extra.data?.[code];
+    const a = full[code] || [];
+    if (!c || !e) { mismatched++; continue; }
+    if (r4(a[0]) !== c[0] || r4(a[1]) !== c[1] || r4(a[4]) !== c[2]) { mismatched++; continue; }
+    if (r4(a[2]) !== e[0] || r4(a[3]) !== e[1] || r0(a[5]) !== e[2]) mismatched++;
+  }
+  stats.finSplit = { core: Object.keys(core.data || {}).length, extra: Object.keys(extra.data || {}).length, mismatched };
+  if (stats.finSplit.core !== fullCodes.length) push('warn', `finance-core 覆盖 ${stats.finSplit.core} ≠ finance-current ${fullCodes.length}，需重跑 build-slim-data`);
+  if (mismatched) push('warn', `finance-core/extra 与 finance-current 有 ${mismatched} 只不一致，需重跑 build-slim-data`);
+} catch (e) {
+  push('warn', 'finance-core/extra 缺失或损坏：' + e.message);
+}
+
 /* 4. 分红数据 sanity */
 let maxDps = 0, maxDpsCode = '', futureYears = 0;
 for (const [code, d] of Object.entries(baseline.dividends || {})) {
@@ -211,9 +235,11 @@ ${Object.entries(stats.dyBuckets).map(([k, v]) => `| ${k}% | ${v} |`).join('\n')
 
 ${issues.length ? issues.map((i) => `- [${i.level}] ${i.text}`).join('\n') : '- 无（全部检查通过）'}
 `;
-const out = path.join(ROOT, '..', 'report', 'AUDIT-APP.md');
+const reportDir = path.join(ROOT, '..', 'report');
+fs.mkdirSync(reportDir, { recursive: true });
+const out = path.join(reportDir, 'AUDIT-APP.md');
 fs.writeFileSync(out, md);
-fs.writeFileSync(path.join(ROOT, '..', 'report', 'audit-app.json'), JSON.stringify({ stats, issues }, null, 2));
+fs.writeFileSync(path.join(reportDir, 'audit-app.json'), JSON.stringify({ stats, issues }, null, 2));
 console.log(JSON.stringify(stats, null, 2));
 console.log('\n问题：', issues.length ? issues : '无');
 console.log('→ report/AUDIT-APP.md');

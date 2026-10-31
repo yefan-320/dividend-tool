@@ -216,17 +216,28 @@ function levelChips(u) {
   return `<div class="chip-row" style="margin:8px 0 12px">${items.map(([id, label, n]) => `<button class="chip ${scanState.levelFilter === id ? 'on' : ''}" data-level="${id}">${label} <b class="num">${n}</b></button>`).join('')}</div>`;
 }
 
+const SORT_LABEL = { dy: '股息率', consec: '连续分红', pct: '分位', cap: '市值', payout: '支付率', score: '综合分' };
+
 function scanView() {
   const all = baseUniverse();
   const u = scanState.levelFilter ? all.filter((r) => r.level === scanState.levelFilter) : all;
   const list = (u === all ? sortedUniverse() : u.slice().sort((a, b) => b.dy - a.dy)).slice(0, 100);
   if (!list.length) return '';
   const maxScore = Math.max(...list.map((x) => x.score || 0), 1);
+  const sortKey = scanState.sort.key;
+  const sortDir = scanState.sort.dir > 0 ? '↑' : '↓';
   return `${statCards(all)}
   ${levelChips(all)}
   ${toggleChips()}
   <section class="panel fade-in">
-    <div class="panel-head"><span class="panel-title">扫描榜</span><span class="section-note">全市场 ${u.length} 只有分红记录 · 按${scanState.sort.key === 'dy' ? '股息率' : '当前排序'} · 前 100</span></div>
+    <div class="panel-head">
+      <span class="panel-title">扫描榜</span>
+      <span class="section-note">全市场 ${u.length} 只有分红记录 · 前 100</span>
+      <label class="scan-sort-inline">
+        <span>排序</span>
+        <select id="scanSort">${Object.entries(SORT_LABEL).map(([k, label]) => `<option value="${k}"${k === sortKey ? ' selected' : ''}>${label}${k === sortKey ? sortDir : ''}</option>`).join('')}</select>
+      </label>
+    </div>
     ${table(list)}
   </section>
   <section class="panel fade-in" style="margin-top:14px">
@@ -392,6 +403,13 @@ export async function bindScan() {
   document.querySelectorAll('[data-level]').forEach((b) => {
     b.onclick = () => { scanState.levelFilter = b.dataset.level; rerender(); };
   });
+  const sortSel = document.getElementById('scanSort');
+  if (sortSel) {
+    sortSel.onchange = () => {
+      scanState.sort = { key: sortSel.value, dir: -1 };
+      rerender();
+    };
+  }
   document.querySelectorAll('[data-sort]').forEach((th) => {
     th.onclick = () => {
       const key = th.dataset.sort;
