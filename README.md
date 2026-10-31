@@ -1,6 +1,6 @@
 # 红利工具
 
-> 线上版（手机可直接打开）：**https://yefan-320.github.io/dividend-tool/**
+> 线上版（手机可直接打开，不依赖本机服务）：**https://yefan-320.github.io/dividend-tool-v3/**
 
 本地离线的 A 股红利工具：全市场股息率扫描、个股决策、组合回测（组合 / 个股 / 对比）、持仓账本。纯静态站点，无构建、无后端，所有数据在本地。
 
@@ -30,22 +30,20 @@ python3 -m http.server 8766
 
 ## 手机访问
 
-**已部署：`https://yefan-320.github.io/dividend-tool/`（GitHub Pages，手机直接打开，不依赖 Mac）**
+**已部署：`https://yefan-320.github.io/dividend-tool-v3/`（GitHub Pages，手机直接打开，不依赖 Mac / 本机服务）**
 
-重新部署/更新：
+更新线上版本（**不需要再授权**）：
 
-旧版就是这么做的：`https://yefan-320.github.io/dividend-tool/`。新版已准备好部署：
+1. 双击 `../部署到GitHub.command`，或 `cd 红利工具 && git push origin main`；
+2. GitHub Pages 自动重建，1–2 分钟后手机刷新即可。
 
-1. 去 GitHub 建空仓库（如 `dividend-tool`，不要勾 README）；
-2. 双击 `../部署到GitHub.command`，粘贴仓库地址；
-3. 仓库 Settings → Pages → Source: Deploy from a branch → `main` → `/(root)` → Save；
-4. 手机打开 `https://<你的用户名>.github.io/<仓库名>/`，可「添加到主屏幕」。
+> 本机已配置该仓库的 SSH 部署密钥（`红利工具/.git/d3-deploy-key`），推送自动使用，不再需要 GitHub 授权。换机器/换仓库见 `../report/DEPLOY-GITHUB.md`。
 
 详细说明见 `../report/DEPLOY-GITHUB.md`。
 
 | 场景 | 做法 | 限制 |
 |---|---|---|
-| 出门 / 永久 | GitHub Pages（上面 4 步） | 需要你的 GitHub 账号做一次推送+开 Pages |
+| 出门 / 永久 | GitHub Pages（已部署） | 更新时双击 `../部署到GitHub.command`，无需再授权 |
 | 同一 Wi-Fi | 双击 `../手机访问.command` → 手机打开打印的局域网地址 | Mac 要开机；http 下 PWA 不能离线安装 |
 | 临时公网（Mac 需开机） | `cloudflared tunnel --url http://127.0.0.1:8766` | 需要本机装 cloudflared；链接临时 |
 
@@ -119,7 +117,7 @@ src/engine/verdict.js           单股决策：亏损/支付率≥85%/现金流�
 ## 测试与体检
 
 ```bash
-node --test test/*.test.js     # 50 个用例（finance/portfolio/market/verdict/plan/组合回测/个股回测/联网解析）
+node --test test/*.test.js     # 80 个用例（finance/portfolio/market/verdict/plan/建仓节奏/组合回测/个股回测/联网解析）
 node tools/smoke-all.mjs       # 浏览器全站冒烟：5 页 + 4 选股视图 + 3 我的视图 + 方案编辑/执行清单 + 深浅色 + 移动端（36 项）
 node tools/audit-app.mjs       # 数据覆盖/一致性/异常值 + 引擎自检
 node tools/perf.mjs            # 冷/热加载性能
@@ -128,8 +126,8 @@ node tools/shot.js             # 界面截图 → ../report/design/
 
 当前结果：
 
-- 单测 **50/50**；
-- 冒烟 **31/31**，0 console 报错；
+- 单测 **80/80**；
+- 冒烟 **36/36**，0 console 报错；
 - 数据体检：全部通过（覆盖 / 时点 / 股息率分布 / 日 K 与行情一致性 / 未上市识别 / 引擎起点净值=本金）；
 - 加载性能（1280×1000，本地）：冷加载 100–260ms、热加载 60–170ms、首屏渲染 60–160ms；今天/我的/选股/个股首屏数据 2.3MB，回测 9.5MB（月线 + 历史财报，按需）。
 
