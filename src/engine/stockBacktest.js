@@ -245,10 +245,11 @@ export function runInvestBacktest(o) {
   let yearIn = 0;
   let lastYear = null;
 
-  // 第一天：首次本金全买
-  const d0 = dates[0];
+  // 建仓日：区间第一天可能停牌/没数据，顺延到第一个有收盘价的交易日
+  let d0 = null;
+  let p0 = 0;
+  for (const d of dates) { const v = px(d); if (v > 0) { d0 = d; p0 = v; break; } }
   if (d0) {
-    const p0 = px(d0);
     const n0 = p0 > 0 ? Math.floor(capital / p0 / 100) * 100 : 0;
     shares = n0;
     cash = capital - n0 * p0;
@@ -281,7 +282,7 @@ export function runInvestBacktest(o) {
     lastYear = y;
 
     // 定投：每个月末投一笔，设 5000 就是每月 5000
-    if (i > 0 && monthlyAdd > 0 && monthEndDay) {
+    if (i > 0 && monthlyAdd > 0 && monthEndDay && (!d0 || date >= d0)) {
       cash += monthlyAdd;
       totalIn += monthlyAdd;
       yearIn += monthlyAdd;
