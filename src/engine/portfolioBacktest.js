@@ -122,18 +122,21 @@ export function buildBenchmark({ dates, rows, capital, monthlyAdd, from, to, flo
   let units = capital / p0;
   const flowsOut = [[dates[0], -capital]];
   const out = [[dates[0], capital]];
+  // 指数点位脏数据（<=0）时沿用上一个有效点位，而不是回落到初始本金
+  let lastP = p0;
   for (let i = 1; i < dates.length; i++) {
     const d = dates[i];
     const p = prices[i];
-    if (!(p > 0)) { out.push([d, units * p0]); continue; }
+    if (p > 0) lastP = p;
+    const useP = p > 0 ? p : lastP;
     const monthEnd = isMonthEnd(dates, i);
     const mm = d.slice(5, 7);
     if (monthlyAdd > 0 && monthEnd && (mm === '04' || mm === '12')) {
       const amt = monthlyAdd * 6;
-      units += amt / p;
+      units += amt / useP;
       flowsOut.push([d, amt]);
     }
-    out.push([d, units * p]);
+    out.push([d, units * useP]);
   }
   const end = out[out.length - 1][1];
   const cagr = flows

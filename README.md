@@ -128,6 +128,8 @@ node tools/smoke-all.mjs       # 浏览器全站冒烟：5 页 + 4 选股视图 
 node tools/audit-app.mjs       # 数据覆盖/一致性/异常值/新鲜度 + 引擎自检
 node tools/check-budget.mjs    # 首屏性能预算：核心数据/JS gzip 体积、懒加载结构、SW 预缓存
 node tools/check-xss.mjs       # XSS/转义审计（需 8766 + Chrome 9222；CI 里跟冒烟一起跑）
+node tools/check-render-budget.mjs  # 渲染耗时门禁（CPU 4x，冷/热渲染预算；CI 里跟冒烟一起跑）
+node tools/check-pwa.mjs       # PWA 可安装性（SW 控制、installability、manifest/图标）
 node tools/perf.mjs            # 冷/热加载性能（含 ECharts 按需加载核验）
 node tools/perf-boot.mjs       # 首屏启动：本地 vs 慢 4G + 4x CPU（骨架出现时间 / 完整首屏）
 node tools/perf-render.mjs     # 各页面 render() 耗时（CPU 4x，比较优化前后）
@@ -135,7 +137,7 @@ node tools/shot.js             # 界面截图 → ../report/design/
 ```
 
 `npm run verify` = 单测 + 静态检查 + 性能预算 + 数据体检（不需要浏览器）；`npm run smoke` / `npm run perf` 需要本地 8766 + Chrome 9222。
-每次 `git push main` 后 GitHub Actions 会自动跑六项：177 单测 + 静态检查 + 数据体检 + 首屏性能预算 + 浏览器冒烟 36 项 + XSS 审计（`.github/workflows/test.yml`，CI 里自起静态服务与无头 Chrome）；另有每日线上健康检查（`.github/workflows/health.yml`）。失败会在仓库 Actions 页提示。
+每次 `git push main` 后 GitHub Actions 会自动跑：177 单测 + 静态检查 + 数据体检 + 首屏性能预算 + 浏览器冒烟 36 项 + 渲染耗时门禁 + XSS 审计 + PWA 可安装性（`.github/workflows/test.yml`，CI 里自起静态服务与无头 Chrome）；另有每日线上健康检查（`.github/workflows/health.yml`）。失败会在仓库 Actions 页提示。
 
 当前结果：
 
