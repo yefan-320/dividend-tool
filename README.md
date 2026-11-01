@@ -132,6 +132,8 @@ node tools/check-xss.mjs       # XSS/转义审计（需 8766 + Chrome 9222；CI 
 node tools/check-render-budget.mjs  # 渲染耗时门禁（CPU 4x，冷/热渲染预算；CI 里跟冒烟一起跑）
 node tools/check-pwa.mjs       # PWA 可安装性（SW 控制、installability、manifest/图标）
 node tools/check-plan-flow.mjs # 执行清单端到端：引擎期望 vs 页面渲染（含现金缺口/记一笔落账/dip 未触发/卖出场景）
+node tools/check-backtest-modes.mjs # 组合对比/持仓回放端到端：引擎期望 vs 指标卡/对比表（含多方案截断、空账本、基准行保留）
+node tools/check-ios.mjs       # iOS 适配：安全区/dvh/输入框 16px/点按/tabbar，3 种机型 × 5 页仿真
 node tools/check-offline.mjs   # 离线可用性：页面 + SW 双断网，今天/选股/个股可打开
 node tools/perf.mjs            # 冷/热加载性能（含 ECharts 按需加载核验）
 node tools/perf-boot.mjs       # 首屏启动：本地 vs 慢 4G + 4x CPU（骨架出现时间 / 完整首屏）
@@ -140,12 +142,13 @@ node tools/shot.js             # 界面截图 → ../report/design/
 ```
 
 `npm run verify` = 单测 + 静态检查 + 性能预算 + 数据体检（不需要浏览器）；`npm run smoke` / `npm run perf` 需要本地 8766 + Chrome 9222。
-每次 `git push main` 后 GitHub Actions 会自动跑：181 单测 + 静态检查 + 数据体检 + 首屏性能预算 + 浏览器冒烟 36 项 + 渲染耗时门禁 + XSS 审计 + PWA 可安装性 + 执行清单端到端 + 离线可用性（`.github/workflows/test.yml`，CI 里自起静态服务与无头 Chrome）；另有每日线上健康检查（`.github/workflows/health.yml`）。失败会在仓库 Actions 页提示。
+每次 `git push main` 后 GitHub Actions 会自动跑：181 单测 + 静态检查 + 数据体检 + 首屏性能预算 + 浏览器冒烟 36 项 + 渲染耗时门禁 + XSS 审计 + PWA 可安装性 + 执行清单端到端 + 组合对比/持仓回放端到端 + iOS 适配 + 离线可用性（`.github/workflows/test.yml`，CI 里自起静态服务与无头 Chrome）；另有每日线上健康检查（`.github/workflows/health.yml`）。失败会在仓库 Actions 页提示。
 
 当前结果：
 
 - 单测 **181/181**（含 35 个回测差分测试：独立朴素参考实现对照 plan 调仓/组合 once/staged/dip/replay/个股/执行清单/月追加/基准/市场工具/纯函数性）；
 - 冒烟 **36/36**，0 console 报错；
+- 组合对比/持仓回放端到端 **33/33**（指标卡/对比表与引擎逐项一致，含 7 方案截断与空账本边界）；iOS 适配 **167/167**（iPhone 14 / iPhone SE / 横屏 × 5 页）；
 - 数据体检：全部通过（覆盖 / 时点 / 股息率分布 / 日 K 与行情一致性 / 未上市识别 / 引擎起点净值=本金）；
 - 加载性能（1280×1000，本地）：冷加载 99–323ms、热加载 57–224ms、首屏渲染 53–222ms；首屏 JS 330KB（ECharts 1MB 按需加载，仅个股/回测页首次进页加载）。
 - 首屏数据：核心 JSON 约 1.75MB（gzip 422KB）——比拆分前的 2.3MB / gzip 595KB 少 **29%**；回测月线 9MB、历史财报 4.4MB 按需加载。

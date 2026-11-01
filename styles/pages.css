@@ -454,3 +454,12 @@
   .pec-sug { font-size: 11.5px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
   .pec-trigger { font-size: 10px; color: var(--text-3); font-family: var(--mono); }
 }
+
+/* ---------- iOS：聚焦输入框会整页放大（字号 <16px 必触发） ----------
+   放在 pages.css 末尾：同优先级下晚出现才盖得住上面的 11.5/13px */
+@media (max-width: 900px) {
+  input.input, textarea.input { font-size: 16px; }
+  .stock-search input { font-size: 16px; }
+  .bt-field .input { width: 140px; }
+  .bt-field input[type=number] { width: 108px; }
+}

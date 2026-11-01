@@ -43,6 +43,22 @@ export const btState = {
 
 let ctx = null;
 
+/* 持仓构成「播放」用的定时器：必须在换页/重渲染时清掉，
+   否则 interval 会一直往已经摘掉的 DOM 上画图（内存与 CPU 只增不减）。 */
+let compTimer = null;
+function stopCompPlay() {
+  if (compTimer) { clearInterval(compTimer); compTimer = null; }
+  const btn = document.getElementById('compPlay');
+  if (btn) btn.textContent = '播放 ▶';
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', () => {
+    if ((location.hash || '').replace(/^#/, '').split('?')[0] !== 'backtest') stopCompPlay();
+  });
+  // e2e 用：确认换页后播放定时器确实停了
+  window.__btDebug = () => ({ compTimer: !!compTimer });
+}
+
 /* ---------------- 基础工具 ---------------- */
 
 function addYears(dateStr, n) {
@@ -378,7 +394,9 @@ function similarStates(market, codes, nav, from, to) {
       if (Math.abs(avg - cur) > 18) continue;
       const a = navAt(nav, `${y}-04-30`);
       const b = navAt(nav, `${y + 1}-04-30`);
-      if (a == null || b == null) continue;
+      // 0 也要挡：回放模式下账本为空时净值可能整段是 0，b/a 会算出 NaN/Infinity，
+      // JSON 往返后变成 null，画图时 p.ret.toFixed 直接抛错（页面绑定报错）
+      if (!(a > 0) || !(b > 0)) continue;
       points.push({ pct: +avg.toFixed(0), ret: (b / a - 1) * 100, year: y });
     }
   }
@@ -798,7 +816,7 @@ export async function renderBacktest() {
         holdings: p.holdings, capital: btState.capital, monthlyAdd: btState.monthlyAdd,
         from: clampFrom(btState.from), to: btState.to, mode: 'invest',
       });
-      rows.push({ name: p.name, color: COLORS[i % COLORS.length], nav: r.nav, end: r.end, cagr: r.stats.cagr, mdd: r.stats.mdd, div: r.totalDiv, width: 2 });
+      rows.push({ kind: 'plan', name: p.name, color: COLORS[i % COLORS.length], nav: r.nav, end: r.end, cagr: r.stats.cagr, mdd: r.stats.mdd, div: r.totalDiv, width: 2 });
     });
     const plan = runPlanBacktest({
       baseline: db.baseline,
@@ -812,13 +830,17 @@ export async function renderBacktest() {
       },
     });
     rows.push({
+      kind: 'rule',
       name: `红利策略(${plan.params.holdN}只)`, color: '#7dd3fc',
       nav: plan.nav.map((pt) => [monthEnd(pt.ym), +(btState.capital * pt.nav).toFixed(2)]),
       end: btState.capital * (1 + plan.stats.total), cagr: plan.stats.cagr, mdd: plan.stats.mdd, div: null, width: 1.3,
     });
-    if (b0.bench) rows.push({ name: '中证红利全收益', color: '#8b93a1', nav: b0.bench.rows, end: b0.bench.end, cagr: b0.bench.cagr, mdd: maxDrawdown(b0.bench.rows).mdd, div: null, width: 1.1 });
-    if (b0.lowVol) rows.push({ name: '红利低波全收益', color: '#a78bfa', nav: b0.lowVol.rows, end: b0.lowVol.end, cagr: b0.lowVol.cagr, mdd: maxDrawdown(b0.lowVol.rows).mdd, div: null, width: 1 });
-    ctx.compareRows = rows.slice(0, 8);
+    if (b0.bench) rows.push({ kind: 'bench', name: '中证红利全收益', color: '#8b93a1', nav: b0.bench.rows, end: b0.bench.end, cagr: b0.bench.cagr, mdd: maxDrawdown(b0.bench.rows).mdd, div: null, width: 1.1 });
+    if (b0.lowVol) rows.push({ kind: 'bench', name: '红利低波全收益', color: '#a78bfa', nav: b0.lowVol.rows, end: b0.lowVol.end, cagr: b0.lowVol.cagr, mdd: maxDrawdown(b0.lowVol.rows).mdd, div: null, width: 1 });
+    // 方案很多时给策略/指数留位置：最多 5 个方案，其余名额归基准行
+    const planRows = rows.filter((r) => r.kind === 'plan');
+    const restRows = rows.filter((r) => r.kind !== 'plan');
+    ctx.compareRows = [...planRows.slice(0, 5), ...restRows].slice(0, 8);
     ctx.compareBench = b0.bench;
     ctx.compareLowVol = b0.lowVol;
     body = renderCompare(market, s);
@@ -840,6 +862,7 @@ export async function renderBacktest() {
 
 export function bindBacktest() {
   if (!ctx) return;
+  stopCompPlay();
   const rerender = () => { if (rerenderHook) rerenderHook(); };
   const syncUrl = () => {
     try {
@@ -920,7 +943,6 @@ export function bindBacktest() {
     const play = document.getElementById('compPlay');
     const COLORS = ['#d8a84e', '#ef5b60', '#5b9cf5', '#35b57a', '#a78bfa', '#e8a33d', '#22b8cf', '#f783ac', '#94d82d'];
     let idx = p.comp.length - 1;
-    let timer = null;
     const paint = () => {
       const [d, row] = p.comp[idx];
       const entries = Object.entries(row).filter(([, v]) => v > 0.5).sort((a, b) => b[1] - a[1]).map(([code, v], i) => ({
@@ -939,11 +961,11 @@ export function bindBacktest() {
       range.oninput = () => { idx = Math.min(p.comp.length - 1, Math.max(0, Number(range.value) || 0)); paint(); };
     }
     if (play) play.onclick = () => {
-      if (timer) { clearInterval(timer); timer = null; play.textContent = '播放 ▶'; return; }
+      if (compTimer) { stopCompPlay(); return; }
       play.textContent = '暂停 ⏸';
-      timer = setInterval(() => {
+      compTimer = setInterval(() => {
         idx++;
-        if (idx >= p.comp.length) { idx = p.comp.length - 1; clearInterval(timer); timer = null; play.textContent = '播放 ▶'; }
+        if (idx >= p.comp.length) { idx = p.comp.length - 1; stopCompPlay(); }
         if (range) range.value = String(idx);
         paint();
       }, 90);

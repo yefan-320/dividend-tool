@@ -1,6 +1,8 @@
 /**
  * 全站冒烟测试：5 个页面 + 选股 4 视图 + 我的 3 视图 + 个股自选/买入 + 回测 3 tab + 深浅色 + 移动端。
  * 运行前先启动 8766 与 Chrome 9222：node tools/smoke-all.mjs
+ * 用 ?offline=1 强制走本地快照：冒烟只验证页面/交互/渲染，不依赖外网；
+ * 否则腾讯日 K 请求一旦挂起（最长 12s 超时），对比图这类按需联网的图表会随机超时。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,7 +13,7 @@ const OUT = path.resolve(__dirname, '../../report/design');
 fs.mkdirSync(OUT, { recursive: true });
 fs.mkdirSync(path.resolve(OUT, '..'), { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const BASE = 'http://127.0.0.1:8766/?theme=dark&nosw=1';
+const BASE = 'http://127.0.0.1:8766/?theme=dark&nosw=1&offline=1';
 let bust = 0;
 let ws = null;
 let send = null;
@@ -149,17 +151,24 @@ async function main() {
     ok('条件过滤生效', /命中/.test(count), count.trim());
   });
   await scenario('多股对比', async () => {
-    await evalJs("document.querySelector('[data-view=\"cmp\"]').click()");
-    await sleep(2500);
+    // 对比标签池 = 已选 + 自选 + 持仓 + 热榜；先塞两只「本地有日 K」的自选，
+    // 保证对比图不依赖外网（离线快照里只带 7 只演示股的日 K）
+    await evalJs(`localStorage.setItem('d3:watch', JSON.stringify(['600036','601398','601318']))`);
+    await nav('#scan?view=cmp');
+    await sleep(1200);
     const chips = await evalJs("document.querySelectorAll('[data-cmp]').length");
     ok('对比标签', chips > 0, `chips=${chips}`);
-    // 选两只
-    await evalJs(`(()=>{const bs=[...document.querySelectorAll('[data-cmp]')]; bs[0].click();})()`);
-    await sleep(1200);
-    await evalJs(`(()=>{const bs=[...document.querySelectorAll('[data-cmp]')]; bs[1].click();})()`);
-    await sleep(5000);
-    const canvas = await evalJs("document.querySelectorAll('#cmpChart canvas').length");
+    await evalJs(`(()=>{for(const c of ['600036','601398']){const b=document.querySelector('[data-cmp="'+c+'"]'); if(b) b.click();}})()`);
+    // 等图表出现（最多 12s），不靠固定 sleep 赌加载速度
+    let canvas = 0;
+    for (let i = 0; i < 60; i++) {
+      canvas = await evalJs("document.querySelectorAll('#cmpChart canvas').length");
+      if (canvas > 0) break;
+      await sleep(200);
+    }
     ok('对比图', canvas > 0, `canvas=${canvas}`);
+    // 还原自选，后面的「自选」场景默认从空列表开始
+    await evalJs(`localStorage.removeItem('d3:watch')`);
   });
   await scenario('自选', async () => {
     await nav('#scan');

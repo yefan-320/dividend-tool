@@ -59,6 +59,12 @@ function renderTabbar(active) {
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
   localStorage.setItem('d3:theme', theme);
+  // iOS 地址栏 / PWA 状态栏颜色跟着深浅色走（只更新 theme-color 标签，不重排）
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) {
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+    if (bg) meta.setAttribute('content', bg);
+  }
   const btn = document.getElementById('themeBtn');
   if (btn) btn.innerHTML = icon(theme === 'dark' ? 'sun' : 'moon');
 }
@@ -89,6 +95,15 @@ function skeleton() {
 
 let renderToken = 0;
 
+/** 换页前销毁旧图表实例：否则每次切换都留一批 canvas + 监听在已摘掉的 DOM 上（内存只增不减） */
+function disposeCharts() {
+  const ec = window.echarts;
+  if (!ec) return;
+  document.querySelectorAll('.chart').forEach((el) => {
+    try { const ch = ec.getInstanceByDom(el); if (ch) ch.dispose(); } catch (e) { /* 已销毁 */ }
+  });
+}
+
 async function renderPage() {
   // 快速切换 tab 时，上一次异步 render 可能后返回；用 token 丢弃过期结果，避免旧页面覆盖新页面
   const token = ++renderToken;
@@ -103,12 +118,14 @@ async function renderPage() {
     const html = await page.render();
     if (token !== renderToken) { clearTimeout(loadingTimer); return; }
     clearTimeout(loadingTimer);
+    disposeCharts();
     app.innerHTML = html;
     try { applyTableLayout(app); } catch (e) { console.error('[表格布局]', e); }
   } catch (e) {
     clearTimeout(loadingTimer);
     if (token !== renderToken) return;
     console.error(e);
+    disposeCharts();
     app.innerHTML = `<div class="banner warn" style="margin:24px">页面加载失败：${e.message}<br>请刷新重试，或确认网络后再打开。</div>`;
   }
   if (token !== renderToken) return;
@@ -201,6 +218,20 @@ async function boot() {
   performance.mark?.('d3-first-render');
   // 首屏之后后台刷新全市场行情（失败不影响页面）
   setTimeout(() => { refreshQuotesInBackground(); }, 500);
+  warmChartsCache();
+}
+
+/** 让 SW 在空闲时补下图表库（离线画图用）；省流量模式/2G 不补，画图时再按需加载 */
+function warmChartsCache() {
+  try {
+    const conn = navigator.connection || {};
+    if (conn.saveData || /^(slow-)?2g$/.test(conn.effectiveType || '')) return;
+    const post = () => {
+      try { navigator.serviceWorker?.controller?.postMessage({ type: 'warm-charts' }); } catch (e) {}
+    };
+    const idle = () => (window.requestIdleCallback ? window.requestIdleCallback(post, { timeout: 4000 }) : setTimeout(post, 1500));
+    navigator.serviceWorker?.ready.then(idle, () => {});
+  } catch (e) { /* 不支持就只走按需加载 */ }
 }
 
 // PWA：注册 Service Worker（测试页面可用 ?nosw=1 跳过，避免缓存干扰）

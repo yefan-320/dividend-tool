@@ -87,7 +87,7 @@
   --shadow-soft: 0 1px 2px rgba(15, 20, 26, .04);
 }
 
-* { box-sizing: border-box; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; /* iOS 点按灰块 */ }
 
 html, body {
   margin: 0;
@@ -99,11 +99,16 @@ html, body {
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* iOS 横屏/放大文字时不要自动放大字号，布局会错位 */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
   min-height: 100vh;
+  min-height: 100dvh; /* iOS 地址栏收起/展开时 100vh 会跳，dvh 跟随可见区域 */
   overflow-x: hidden;
+  overscroll-behavior-y: none; /* 去掉 iOS 橡皮筋回弹 + 下拉刷新，深色底不会闪白 */
 }
 
 ::selection { background: var(--accent-soft); color: var(--text); }

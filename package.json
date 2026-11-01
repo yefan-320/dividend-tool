@@ -21,6 +21,8 @@
     "render-budget": "node tools/check-render-budget.mjs",
     "pwa": "node tools/check-pwa.mjs",
     "plan-flow": "node tools/check-plan-flow.mjs",
-    "offline": "node tools/check-offline.mjs"
+    "offline": "node tools/check-offline.mjs",
+    "backtest-modes": "node tools/check-backtest-modes.mjs",
+    "ios": "node tools/check-ios.mjs"
   }
 }

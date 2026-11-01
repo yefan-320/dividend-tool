@@ -21,7 +21,7 @@ jobs:
         run: node tools/audit-app.mjs
       - name: 首屏性能预算（数据/JS gzip 体积、懒加载结构）
         run: node tools/check-budget.mjs
-      - name: 浏览器冒烟（36 项，本地静态服务 + 无头 Chrome）
+      - name: 浏览器冒烟与端到端检查（本地静态服务 + 无头 Chrome）
         run: |
           mkdir -p ../report/design
           python3 -m http.server 8766 --bind 127.0.0.1 >/tmp/http.log 2>&1 &
@@ -35,4 +35,6 @@ jobs:
           node tools/check-xss.mjs
           node tools/check-pwa.mjs
           node tools/check-plan-flow.mjs
+          node tools/check-backtest-modes.mjs
+          node tools/check-ios.mjs
           node tools/check-offline.mjs

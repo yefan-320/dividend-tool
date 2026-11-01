@@ -80,6 +80,17 @@ try {
     check(`在线预热：${name} 渲染`, st.title !== '' && st.appLen > 500, st.title);
   }
 
+  // 图表库不在安装预缓存里（少下 326KB），靠页面空闲时发 warm-charts 消息补缓存；
+  // 离线画图前确认它真的进了缓存 —— 这同时验证「暖缓存」机制本身
+  const echartsCached = await evalJs(`(async () => {
+    for (let i = 0; i < 60; i++) {
+      try { const hit = await caches.match('./vendor/echarts.min.js'); if (hit) return true; } catch (e) {}
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return false;
+  })()`);
+  check('在线预热：图表库进 SW 暖缓存（安装期不预缓存，空闲补）', echartsCached);
+
   /* ---------- 2) 页面 + SW 双断网 ---------- */
   const targets = await send('Target.getTargets');
   const swTarget = (targets.targetInfos || []).find((t) => t.type === 'service_worker');

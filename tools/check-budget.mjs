@@ -25,7 +25,7 @@ const BUDGET = {
   coreDataKB: 420,
   shellKB: 140,
   firstLoadKB: 560,
-  precacheKB: 950, // SW 安装时后台预缓存总量（含离线用的 ECharts），不阻塞首屏；演示日 K 已改为按需缓存
+  precacheKB: 620, // SW 安装时后台预缓存总量：ECharts 移出后应约 540KB（以前含图表库是 865KB）
 };
 
 /* 1. 首屏核心数据 */
@@ -63,10 +63,15 @@ const lazyEcharts = chartsJs.includes('ensureEcharts') && chartsJs.includes("ven
 const sw = readText('sw.js');
 const shellBlock = (sw.match(/const SHELL = \[([\s\S]*?)\];/) || [])[1] || '';
 const shellList = [...shellBlock.matchAll(/'([^']+)'/g)].map((m) => m[1]);
-// monthly / finance-history / finance-extra 体积大且只在不常用页按需用，不进预缓存
-const mustNotPrecache = ['data/monthly.json', 'data/finance-history.json', 'data/finance-extra.json'];
-// ECharts 运行时按需执行，但为了离线画图仍预缓存（后台下载，不阻塞首屏）
-const mustPrecache = ['data/quotes.json', 'data/baseline.json', 'data/finance-core.json', 'data/benchmark.json', './src/main.js', './vendor/echarts.min.js'];
+// monthly / finance-history / finance-extra 体积大且只在不常用页按需用，不进预缓存；
+// echarts 1MB 也不进安装预缓存，改由 WARM 暖缓存（否则「装好即离线可用」要多等约 40%）
+const mustNotPrecache = ['data/monthly.json', 'data/finance-history.json', 'data/finance-extra.json', 'vendor/echarts.min.js'];
+const mustPrecache = ['data/quotes.json', 'data/baseline.json', 'data/finance-core.json', 'data/benchmark.json', './src/main.js'];
+// 暖缓存：SW 里声明 + 页面空闲时发消息补下载
+const warmBlock = (sw.match(/const WARM = \[([\s\S]*?)\];/) || [])[1] || '';
+const warmList = [...warmBlock.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+const mainJs = readText('src/main.js');
+const postsWarm = /postMessage\(\{\s*type:\s*'warm-charts'/.test(mainJs);
 
 const problems = [];
 const fmt = (n) => n.toFixed(1) + 'KB';
@@ -85,8 +90,11 @@ if (shellKB > BUDGET.shellKB) problems.push(`外壳 JS/CSS ${fmt(shellKB)} 超�
 if (firstLoadKB > BUDGET.firstLoadKB) problems.push(`首屏总量 ${fmt(firstLoadKB)} 超预算 ${BUDGET.firstLoadKB}KB`);
 if (syncEcharts) problems.push('index.html 里仍有同步 ECharts <script>，必须是按需加载');
 if (!lazyEcharts) problems.push('src/charts.js 找不到 ensureEcharts 懒加载实现');
+if (!warmList.some((u) => u.replace(/^\.\//, '') === 'vendor/echarts.min.js')) problems.push('sw.js 的 WARM 里应包含 vendor/echarts.min.js（离线画图暖缓存）');
+if (!postsWarm) problems.push('src/main.js 没有在空闲时发 { type: \'warm-charts\' } 让 SW 补缓存');
 for (const f of mustNotPrecache) {
-  const hit = shellList.some((u) => u.includes(f));
+  const base = f.replace(/^\.\//, '');
+  const hit = shellList.some((u) => u.replace(/^\.\//, '') === base || u.includes(base));
   if (hit) problems.push(`${f} 是懒加载大文件，不应进 SW 预缓存`);
 }
 for (const f of mustPrecache) {
@@ -102,6 +110,7 @@ for (const u of shellList) {
   if (fs.existsSync(path.join(ROOT, rel))) precacheKB += gzipSize(rel) / 1024;
 }
 console.log('  SW 后台预缓存合计（' + shellList.length + ' 项）'.padEnd(28) + fmt(precacheKB) + ' / ' + BUDGET.precacheKB + 'KB');
+console.log('  暖缓存（空闲补下）'.padEnd(30) + warmList.join(', '));
 if (precacheKB > BUDGET.precacheKB) problems.push(`SW 预缓存 ${fmt(precacheKB)} 超预算 ${BUDGET.precacheKB}KB`);
 
 if (problems.length) {

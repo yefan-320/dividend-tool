@@ -315,6 +315,8 @@ function drawDivChartImpl(el, divByY) {
 
 function drawSimilarChartImpl(el, points, curPct, median) {
   if (!el || typeof echarts === 'undefined') return null;
+  // dataset 走的是 JSON 往返：NaN/Infinity 会变成 null，这里再兜一层，别让 toFixed 抛错
+  points = (points || []).filter((p) => p && Number.isFinite(p.pct) && Number.isFinite(p.ret));
   const t = theme();
   const ch = chart(el);
   ch.setOption({

@@ -1,10 +1,14 @@
 /* 红利工具 Service Worker：应用外壳预缓存 + 数据 stale-while-revalidate。
-   代码更新时把 VERSION 加一（v1.0.0 → v1.0.1）即可让旧缓存失效。 */
+   代码更新时把 VERSION 加一（v1.0.0 → v1.0.1）即可让旧缓存失效。
+
+   图表库（echarts 原始 1MB / gzip 约 326KB）不放进安装预缓存：
+   首屏和离线外壳都不需要它，放进 SHELL 会让「装好、离线可用」多等约 40% 的下载。
+   改由页面空闲时发 warm-charts 消息补缓存（见 WARM / warmAll），
+   没补上也不影响在线画图——外壳的 fetch 处理器会把首次取到的文件顺手缓存。 */
 const VERSION = 'hongli-v1.0.0';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './styles/tokens.css', './styles/base.css', './styles/components.css', './styles/pages.css',
-  './vendor/echarts.min.js',
   './src/main.js', './src/data.js', './src/net.js', './src/store.js', './src/charts.js',
   './src/pages/today.js', './src/pages/scan.js', './src/pages/stock.js', './src/pages/backtest.js', './src/pages/mine.js', './src/pages/plans.js',
   './src/engine/plan.js', './src/engine/finance.js', './src/engine/portfolio.js', './src/engine/market.js',
@@ -15,6 +19,18 @@ const SHELL = [
   './data/finance-core.json', './data/dy-pct.json',
   './data/daily/meta.json',
 ];
+
+/* 暖缓存：不阻塞安装/激活；页面空闲（或首次用到图表页）时再补 */
+const WARM = ['./vendor/echarts.min.js'];
+
+async function warmAll(list) {
+  const cache = await caches.open(VERSION);
+  await Promise.allSettled(list.map(async (u) => {
+    const abs = new URL(u, self.registration.scope).href;
+    if (await cache.match(abs)) return;
+    try { await cache.add(new Request(abs, { cache: 'reload' })); } catch (e) { /* 断网/中断：下次再补 */ }
+  }));
+}
 
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {
@@ -29,7 +45,14 @@ self.addEventListener('activate', (e) => {
     const keys = await caches.keys();
     await Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k)));
     await self.clients.claim();
+    // 尽力而为：不放进 waitUntil，避免把「激活完成」拖到 326KB 之后；
+    // 常规路径是页面空闲时发 warm-charts 消息（那时 SW 一定已激活）。
+    warmAll(WARM).catch(() => {});
   })());
+});
+
+self.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'warm-charts') e.waitUntil(warmAll(WARM));
 });
 
 self.addEventListener('fetch', (e) => {

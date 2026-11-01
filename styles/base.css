@@ -5,6 +5,7 @@
   display: grid;
   grid-template-columns: 216px minmax(0, 1fr);
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* ---------- 侧栏 ---------- */
@@ -12,6 +13,7 @@
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   padding: 28px 16px 18px;
@@ -129,6 +131,7 @@
   .shell { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: none; }
   .main { padding: 22px 16px 96px; }
+  .table-wrap, .bt-param-row { -webkit-overflow-scrolling: touch; }
   .page-head { margin-bottom: 18px; }
   .page-title { font-size: 24px; }
 
@@ -264,4 +267,29 @@
   #themeBtn { min-width: 34px; min-height: 34px; }
   .lot-table .btn { min-width: 32px; min-height: 32px; }
   input.input { min-height: 32px; }
+}
+
+/* ---------- iOS / 触屏适配（安全区、视口、输入缩放、点按手感） ---------- */
+.table-wrap { -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+
+@media (max-width: 900px) {
+  .main {
+    /* 顶部安全区：PWA 走 black-translucent 时内容不再顶进状态栏；
+       横屏刘海左右两侧也留出安全区，正文不被切 */
+    padding-top: calc(22px + env(safe-area-inset-top));
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+
+  /* tabbar：高度含底部安全区（原来 62px 里塞 34px padding，图标+文字被压扁） */
+  .tabbar {
+    height: auto;
+    min-height: calc(62px + env(safe-area-inset-bottom));
+    padding: 6px max(8px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+
+
+  /* 去掉双击缩放/300ms 延迟：按钮、tab、可点卡片走 manipulation */
+  .btn, .chip, .bt-chip, .view-tab, .icon-btn, .tabbar a, .nav a, summary, .comp-item { touch-action: manipulation; }
 }
