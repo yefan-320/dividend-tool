@@ -259,13 +259,18 @@ export function runInvestBacktest(o) {
     trades.push({ date: d0, type: '建仓', shares: n0, price: p0, amount: capital, why: '首次本金全买' });
   }
 
+  /* 分红明细：优先用「每一笔的除权除息日」（ev），没有明细才退回「每年 4 月末按年度合计」。
+     一年分两次（中期 + 年度）的公司，只有明细才对得上日子。 */
+  const evAll = Array.isArray(dividends?.[code]?.ev) ? dividends[code].ev : null;
+  const evs = evAll ? evAll.filter(([d, v]) => d >= (dates[0] || '') && (!to || d <= to) && v > 0) : null;
+  let ei = 0;
+
   for (let i = 0; i < dates.length; i++) {
     const date = dates[i];
     const y = Number(date.slice(0, 4));
     const monthEndDay = isMonthEnd(dates, i);
     const mm = date.slice(5, 7);
     const isAprEnd = monthEndDay && mm === '04';
-    const isDecEnd = monthEndDay && mm === '12';
 
     if (lastYear != null && y !== lastYear) {
       yearly.push({ year: lastYear, nav0: yearNav0, nav1: nav[i - 1]?.[1] ?? null, div: yearDiv, cash, invest: yearIn });
@@ -275,41 +280,48 @@ export function runInvestBacktest(o) {
     }
     lastYear = y;
 
-    // 追加：4/12 月末各入 6 个月，跟组合回测、中证红利基准同一口径
-    if (i > 0 && monthlyAdd > 0 && (isAprEnd || isDecEnd)) {
-      const amt = monthlyAdd * 6;
-      cash += amt;
-      totalIn += amt;
-      yearIn += amt;
-      flows.push([date, -amt]);
+    // 定投：每个月末投一笔，设 5000 就是每月 5000
+    if (i > 0 && monthlyAdd > 0 && monthEndDay) {
+      cash += monthlyAdd;
+      totalIn += monthlyAdd;
+      yearIn += monthlyAdd;
+      flows.push([date, -monthlyAdd]);
       const p = px(date);
       const n = p > 0 ? Math.floor(cash / p / 100) * 100 : 0;
       if (n > 0) {
         shares += n;
         cash -= n * p;
-        trades.push({ date, type: '定投', shares: n, price: p, amount: n * p, why: `追加 ${(amt / 10000).toFixed(1)} 万` });
+        trades.push({ date, type: '定投', shares: n, price: p, amount: n * p, why: `每月定投 ${(monthlyAdd / 10000).toFixed(2)} 万` });
       }
     }
 
-    // 分红：4 月末到账，当天再投
-    if (isAprEnd && shares > 0) {
+    /* 分红复投：除权除息日当天按收盘价买回（那天价格已经除过息，用不复权收盘价才对）。
+       除权日撞上周末/停牌，顺延到下一个交易日——也就是这里第一次出现 date >= 除权日的位置。 */
+    const divs = [];
+    if (evs) {
+      while (ei < evs.length && evs[ei][0] <= date) divs.push(evs[ei++]);
+    } else if (isAprEnd) {
       const dps = prevDps(dividends, code, y);
-      if (dps > 0) {
-        const amt = shares * dps;
-        totalDiv += amt;
-        divByY[y] = (divByY[y] || 0) + amt;
-        yearDiv += amt;
-        cash += amt;
-        holdCash += holdShares * dps;   // 对照口径：分红进现金，不投
-        const p = px(date);
-        const n = p > 0 ? Math.floor(cash / p / 100) * 100 : 0;
-        if (n > 0) {
-          shares += n;
-          cash -= n * p;
-          trades.push({ date, type: '分红复投', shares: n, price: p, amount: n * p, dps, why: `${y - 1} 年度分红 ${(amt / 10000).toFixed(2)} 万，当天买回` });
-        } else {
-          trades.push({ date, type: '分红', amount: amt, dps, why: `${y - 1} 年度分红 ` + (amt / 10000).toFixed(2) + ' 万，不够一手，留在现金' });
-        }
+      if (dps > 0) divs.push([`${y}-04-30`, dps]);
+    }
+
+    for (const [xd, dps] of divs) {
+      if (!(shares > 0) || !(dps > 0)) continue;
+      const amt = shares * dps;
+      totalDiv += amt;
+      const dy = Number(String(xd).slice(0, 4));
+      divByY[dy] = (divByY[dy] || 0) + amt;
+      yearDiv += amt;
+      cash += amt;
+      holdCash += holdShares * dps;   // 对照口径：分红进现金，不投
+      const p = px(date);
+      const n = p > 0 ? Math.floor(cash / p / 100) * 100 : 0;
+      if (n > 0) {
+        shares += n;
+        cash -= n * p;
+        trades.push({ date, type: '分红复投', shares: n, price: p, amount: n * p, dps, why: `${xd} 除息，每股派 ${dps.toFixed(4)}，当天买回` });
+      } else {
+        trades.push({ date, type: '分红', amount: amt, dps, why: `${xd} 除息，每股派 ${dps.toFixed(4)}，不够一手留现金` });
       }
     }
 

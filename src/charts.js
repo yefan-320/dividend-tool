@@ -16,6 +16,17 @@ function theme() {
   };
 }
 
+/* 全站统一语义色：同一个东西，不管出现在哪张图里都是同一个颜色。
+   净值=金 · 基准=灰 · 回撤/卖=红 · 分红=青 · 买入/投入=蓝 */
+export const C = {
+  nav: '#d8a84e',
+  bench: '#8b93a1',
+  dd: '#ef5b60',
+  div: '#22b8cf',
+  buy: '#5b9cf5',
+  sell: '#ef5b60',
+};
+
 const chart = (el) => (el ? echarts.getInstanceByDom(el) || echarts.init(el, null, { renderer: 'canvas' }) : null);
 
 function baseTooltip(t) {
@@ -80,14 +91,14 @@ function drawPriceChartImpl(el, rows, opts = {}) {
         if (i == null) return '';
         const c = closes[i];
         const pctv = first > 0 ? (c / first - 1) * 100 : null;
-        const extra = marks.filter((m) => m.date === dates[i]).map((m) => `<div style="font-size:10.5px;color:${m.kind === 'sell' ? t.down : t.accent2}">${m.why || m.kind}</div>`).join('');
+        const extra = marks.filter((m) => m.date === dates[i]).map((m) => `<div style="font-size:10.5px;color:${m.kind === 'sell' ? C.sell : m.kind === 'div' ? C.div : C.buy}">${m.why || m.kind}</div>`).join('');
         return `<div style="font-family:var(--mono);font-size:10px;color:${t.text3};margin-bottom:4px">${dates[i]}</div>` +
           `<div style="font-size:11px;line-height:1.75">收盘 <b>${c}</b>${pctv == null ? '' : `　区间 <b class="${pctv >= 0 ? 'up' : 'down'}">${pctv >= 0 ? '+' : ''}${pctv.toFixed(1)}%</b>`}</div>` + extra;
       },
     },
     xAxis: {
       type: 'category', data: dates, boundaryGap: false, ...baseAxis(t),
-      axisLabel: { color: t.text3, fontSize: 9, interval: Math.max(1, Math.floor(dates.length / 7)), formatter: (v) => String(v).slice(2).replace('-', '/') },
+      axisLabel: { color: t.text3, fontSize: 9, hideOverlap: true, interval: 'auto', formatter: (v) => String(v).slice(2).replace('-', '/') },
     },
     yAxis: {
       type: 'value', scale: true, position: 'right', ...baseAxis(t),
@@ -110,9 +121,9 @@ function drawPriceChartImpl(el, rows, opts = {}) {
         } : undefined,
       },
       ...maSeries,
-      { name: '买入', type: 'scatter', data: buyPts, symbol: 'triangle', symbolSize: 9, itemStyle: { color: t.up, borderColor: '#fff', borderWidth: 1 }, z: 6 },
-      { name: '卖出', type: 'scatter', data: sellPts, symbol: 'triangle', symbolRotate: 180, symbolSize: 9, itemStyle: { color: t.down, borderColor: '#fff', borderWidth: 1 }, z: 6 },
-      { name: '分红', type: 'scatter', data: divPts, symbol: 'diamond', symbolSize: 7, itemStyle: { color: t.accent, borderColor: '#fff', borderWidth: 1 }, z: 5 },
+      { name: '买入', type: 'scatter', data: buyPts, symbol: 'triangle', symbolSize: 9, itemStyle: { color: C.buy, borderColor: '#fff', borderWidth: 1 }, z: 6 },
+      { name: '卖出', type: 'scatter', data: sellPts, symbol: 'triangle', symbolRotate: 180, symbolSize: 9, itemStyle: { color: C.sell, borderColor: '#fff', borderWidth: 1 }, z: 6 },
+      { name: '分红', type: 'scatter', data: divPts, symbol: 'diamond', symbolSize: 7, itemStyle: { color: C.div, borderColor: '#fff', borderWidth: 1 }, z: 5 },
     ],
   });
   return ch;
@@ -161,7 +172,7 @@ function drawPortfolioChartImpl(el, { nav, navR, bench, lowVol, dd, divByY, capi
       bench ? { name: '中证红利全收益', type: 'line', data: pad(bench.rows, W), xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.2, color: t.info, opacity: 0.75 }, z: 3 } : null,
       lowVol ? { name: '红利低波全收益', type: 'line', data: pad(lowVol.rows, W), xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.1, color: '#a78bfa', opacity: 0.7 }, z: 2 } : null,
       { name: '回撤', type: 'line', data: dd || [], xAxisIndex: 1, yAxisIndex: 1, showSymbol: false, lineStyle: { width: 1, color: t.up, opacity: 0.7 }, areaStyle: { color: 'rgba(239,91,96,.13)' }, z: 3 },
-      { name: '年度分红', type: 'bar', data: divVals, xAxisIndex: 2, yAxisIndex: 2, barMaxWidth: 26, itemStyle: { color: 'rgba(216,168,78,.45)', borderRadius: [3, 3, 0, 0] }, label: { show: true, position: 'top', fontSize: 9, color: t.text3, formatter: (p) => p.value + '万' }, z: 2 },
+      { name: '年度分红', type: 'bar', data: divVals, xAxisIndex: 2, yAxisIndex: 2, barMaxWidth: 26, itemStyle: { color: 'rgba(34,184,207,.38)', borderRadius: [3, 3, 0, 0] }, label: { show: true, position: 'top', fontSize: 9, color: t.text3, formatter: (p) => p.value + '万' }, z: 2 },
       { name: '分红增速', type: 'line', data: divGrowth, xAxisIndex: 2, yAxisIndex: 2, showSymbol: true, symbolSize: 4, lineStyle: { width: 1.5, color: '#e8a33d' }, itemStyle: { color: '#e8a33d' }, label: { show: true, position: 'top', fontSize: 8, color: '#e8a33d', formatter: (p) => (p.value == null ? '' : (p.value >= 0 ? '+' : '') + p.value + '%') }, z: 3 },
     ].filter(Boolean),
   });
@@ -202,9 +213,9 @@ function drawNavChartImpl(el, { nav, bench, dd, hold, capital }) {
     ],
     series: [
       { name: '规则净值', type: 'line', data: norm(nav), showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.9, color: t.accent }, z: 4 },
-      holdNorm ? { name: '买入持有', type: 'line', data: holdNorm, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.2, color: t.info, opacity: 0.7 }, z: 3 } : null,
-      benchNorm ? { name: '中证红利全收益', type: 'line', data: benchNorm, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.1, color: t.text3, opacity: 0.85 }, z: 2 } : null,
-      { name: '回撤', type: 'line', data: dd || [], xAxisIndex: 1, yAxisIndex: 1, showSymbol: false, lineStyle: { width: 1, color: t.up, opacity: 0.7 }, areaStyle: { color: 'rgba(239,91,96,.13)' } },
+      holdNorm ? { name: '买入持有', type: 'line', data: holdNorm, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.2, color: C.buy, opacity: 0.7 }, z: 3 } : null,
+      benchNorm ? { name: '中证红利全收益', type: 'line', data: benchNorm, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.1, color: C.bench, opacity: 0.9 }, z: 2 } : null,
+      { name: '回撤', type: 'line', data: dd || [], xAxisIndex: 1, yAxisIndex: 1, showSymbol: false, lineStyle: { width: 1, color: C.dd, opacity: 0.75 }, areaStyle: { color: 'rgba(239,91,96,.13)' } },
     ].filter(Boolean),
   });
   return ch;
@@ -303,8 +314,8 @@ function drawDivChartImpl(el, divByY) {
     xAxis: { type: 'category', data: years, ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9 } },
     yAxis: { type: 'value', ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9, formatter: '{value}万' }, splitLine: { show: true, lineStyle: { color: t.line } } },
     series: [
-      { name: '年度分红', type: 'bar', data: years.map((y) => +(divByY[y] / 10000).toFixed(2)), barMaxWidth: 30, itemStyle: { color: 'rgba(216,168,78,.45)', borderRadius: [3, 3, 0, 0] }, label: { show: true, position: 'top', fontSize: 9, color: t.text3, formatter: (p) => p.value + '万' } },
-      { name: '累计', type: 'line', data: cumVals, showSymbol: true, symbolSize: 4, lineStyle: { width: 2, color: '#e8a33d' }, itemStyle: { color: '#e8a33d' }, areaStyle: { color: 'rgba(232,163,61,.1)' } },
+      { name: '年度分红', type: 'bar', data: years.map((y) => +(divByY[y] / 10000).toFixed(2)), barMaxWidth: 30, itemStyle: { color: 'rgba(34,184,207,.38)', borderRadius: [3, 3, 0, 0] }, label: { show: true, position: 'top', fontSize: 9, color: t.text3, formatter: (p) => p.value + '万' } },
+      { name: '累计', type: 'line', data: cumVals, showSymbol: true, symbolSize: 4, lineStyle: { width: 2, color: C.div }, itemStyle: { color: C.div }, areaStyle: { color: 'rgba(34,184,207,.12)' } },
     ],
   });
   return ch;

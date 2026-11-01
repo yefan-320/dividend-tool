@@ -508,3 +508,6 @@
 .bt-field.bt-check { flex-direction: row; align-items: center; gap: 7px; }
 .bt-field.bt-check input { width: 14px; height: 14px; accent-color: var(--accent); }
 .bt-field.bt-check span { font-size: 11px; color: var(--text-2); }
+
+/* 语义色：分红永远是青的（图里图外一个色），净值金、基准灰、回撤红、买入/投入蓝 */
+.bt-metric .v.divc, .stat-value.divc, .divc.num { color: #22b8cf; }

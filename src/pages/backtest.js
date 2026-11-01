@@ -256,7 +256,7 @@ function paramBar(opts = {}) {
       <button class="btn primary" id="btRun" style="margin-left:auto">${icon('refresh')} 重跑</button>
     </div>
     <div class="bt-hint" style="margin-top:8px">${opts.stock
-      ? `日级净值 · 价格不复权 · 分红 4 月末到账当天再投 · 不判断买卖点（没有卖点）· 不含税 · 行情 <b>${esc(todayStr())}</b> · 日 K 自 ${esc(dailyStart())}（更早用月线）`
+      ? `日级净值 · 价格不复权 · 每月末定投 · 分红在除权除息日当天按收盘价再投 · 不判断买卖点（没有卖点）· 不含税 · 行情 <b>${esc(todayStr())}</b> · 日 K 自 ${esc(dailyStart())}（更早用月线）`
       : `日级净值 · 价格不复权 · 分红 4 月末到账 · 未上市股票份额先摊给已上市、上市满 6 个月建仓 · 不含税 · 行情 <b>${esc(todayStr())}</b> · 日 K 自 ${esc(dailyStart())}（更早用月线）`}</div>
   </section>`;
 }
@@ -291,9 +291,10 @@ function investRules() {
   const R = [
     ['建仓', '第一天把首次本金全买进去（按 100 股整手，零头留现金）'],
     ['定投', btState.monthlyAdd > 0
-      ? `每月 ${bigMoney(btState.monthlyAdd)}，在每年 4 月末 / 12 月末各入账 6 个月，当天全买`
+      ? `每月 ${bigMoney(btState.monthlyAdd)}，月最后一个交易日全买`
       : '本次没开定投（月追加 = 0），只有第一天那笔本金'],
-    ['分红', '每年 4 月末到账（上一年度每股分红 × 当时持股），当天按收盘价再买回；不够一手就留在现金里'],
+    ['分红', '每一笔分红在<b>除权除息日当天</b>按收盘价买回（那天价格已经除过息，用不复权收盘价才对）；不够一手就留在现金里'],
+    ['一年分几次', '按实际派息日走，不做合并：一年一次、两次（中期 + 年度）、三次都照常各算各的'],
     ['不判断买卖点', '不设股息率门槛、不看财报、不因为分红下调卖出——一分钱都不卖，也没有卖点'],
     ['费用', '不含佣金、不含红利税；现金零头不计息'],
     ['价格', '日 K 不复权，更早的区间用月线月末补齐'],
@@ -711,7 +712,7 @@ function renderStockPage(market, structureData) {
       { k: '累计收益', v: pctSign(st.ret == null ? null : st.ret * 100, 1), cls: vc, s: `${num(st.years, 1)} 年 · 本金口径` },
       { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: perYearAdd > 0 ? 'XIRR 资金加权' : '复利折算' },
       { k: '最大回撤', v: pct(st.mdd * 100, 1), cls: 'down', s: `${esc(st.mddPeak)} → ${esc(st.mddTrough)}` },
-      { k: '分红', v: bigMoney(r.totalDiv), cls: 'gold', s: `全部再投，滚了 ${st.reinvest} 次` },
+      { k: '分红', v: bigMoney(r.totalDiv), cls: 'divc', s: `全部再投，滚了 ${st.reinvest} 次` },
     ],
   })}
 
@@ -725,13 +726,13 @@ function renderStockPage(market, structureData) {
     { k: '累计投入', v: bigMoney(r.totalIn), s: perYearAdd > 0 ? `本金 + 定投 ${bigMoney(r.totalIn - btState.capital)}` : '只有本金', key: 'fund' },
     { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: perYearAdd > 0 ? 'XIRR 资金加权' : '复利折算', key: 'ann' },
     { k: '最大回撤', v: pct(st.mdd * 100, 1), cls: 'down', s: `${esc(st.mddPeak)} → ${esc(st.mddTrough)}`, key: 'dd' },
-    { k: '分红', v: bigMoney(r.totalDiv), cls: 'gold', s: `再投 ${st.reinvest} 次，一分没取`, key: 'div' },
+    { k: '分红', v: bigMoney(r.totalDiv), cls: 'divc', s: `再投 ${st.reinvest} 次，一分没取`, key: 'div' },
     { k: '买入持有', v: bigMoney(r.endHold), s: `年化 ${pctSign(st.cagrHold == null ? null : st.cagrHold * 100, 1)} · 分红不复投`, key: 'hold' },
     { k: 'vs 指数', v: pctSign(st.excess == null ? null : st.excess * 100, 1), cls: upDown(st.excess), s: 'vs 中证红利全收益', key: 'bench' },
   ])}
   <div id="metricDetail" style="margin-top:12px"></div>
 
-  ${fold('kline', '日 K · 建仓 / 分红复投', `收盘线 + MA20/MA60 · 红▲买入 金◆分红复投 · 不卖，所以没有卖点`, '<div class="panel-body" style="padding:8px 10px 4px"><div id="stChart" class="chart" style="height:380px"></div></div>')}
+  ${fold('kline', '日 K · 建仓 / 分红复投', `收盘线 + MA20/MA60 · 蓝▲建仓/定投 · 青◆分红复投（除权除息日当天买回）· 不卖，没有卖点`, '<div class="panel-body" style="padding:8px 10px 4px"><div id="stChart" class="chart" style="height:380px"></div></div>')}
 
   <section class="panel fade-in" style="margin-top:14px">
     <div class="panel-head"><span class="panel-title">年度收益</span><span class="section-note">年末市值 / 当年分红 / 当年追加</span></div>

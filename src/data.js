@@ -434,7 +434,8 @@ export async function ensureDividends(codes) {
     await Promise.all(todo.slice(i, i + 8).map(async (c) => {
       try {
         const j = await getJson(`div/${c}.json`, { timeout: 12000 });
-        if (j && j.years) db.baseline.dividends[c] = { years: j.years };
+        // years 给股息率/质量用；ev 是每一笔的「除权除息日 + 每股派息」，个股定投靠它按日复投
+        if (j && j.years) db.baseline.dividends[c] = { years: j.years, ev: j.ev };
         divDone.add(c);
       } catch (e) { /* 没有分红记录：页面按「无」处理 */ }
     }));
