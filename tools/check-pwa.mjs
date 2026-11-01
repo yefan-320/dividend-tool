@@ -44,18 +44,38 @@ const check = (name, ok, detail) => {
   if (!ok) failures.push(name + (detail ? ' ' + detail : ''));
 };
 
-// 1) SW 注册/控制（首次访问会安装，clients.claim 后当前页即可被控制）
+// 1) SW 注册/控制（首次访问会安装；安装可能需要拉 48 个预缓存文件，最多等 30s）
 await send('Page.navigate', { url: SITE });
-await sleep(4000);
-const sw = JSON.parse(await evalJs(`(async () => {
-  try {
-    const reg = await Promise.race([
-      navigator.serviceWorker.ready,
-      new Promise((_, rej) => setTimeout(() => rej(new Error('SW ready 超时')), 15000)),
-    ]);
-    return JSON.stringify({ active: !!reg.active, controlled: !!navigator.serviceWorker.controller });
-  } catch (e) { return JSON.stringify({ error: e.message }); }
-})()`));
+await sleep(2500);
+let sw = { active: false, controlled: false };
+for (let attempt = 0; attempt < 3; attempt++) {
+  sw = JSON.parse(await evalJs(`(async () => {
+    try {
+      const reg = await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('SW ready 超时')), 30000)),
+      ]);
+      return JSON.stringify({ active: !!reg.active, controlled: !!navigator.serviceWorker.controller });
+    } catch (e) {
+      // ready 超时：显式注册一次再等
+      try {
+        await navigator.serviceWorker.register('./sw.js');
+        const reg = await navigator.serviceWorker.ready;
+        return JSON.stringify({ active: !!reg.active, controlled: !!navigator.serviceWorker.controller });
+      } catch (e2) { return JSON.stringify({ error: e2.message }); }
+    }
+  })()`));
+  if (sw.active && sw.controlled) break;
+  // 首次页面可能还没被 claim：刷新一次让它被控制
+  await send('Page.navigate', { url: SITE });
+  await sleep(2500);
+  sw = JSON.parse(await evalJs(`(async () => {
+    let active = false;
+    try { const reg = await navigator.serviceWorker.getRegistration(); active = !!reg?.active; } catch (e) { /* ignore */ }
+    return JSON.stringify({ active, controlled: !!navigator.serviceWorker.controller });
+  })()`));
+  if (sw.active && sw.controlled) break;
+}
 check('Service Worker 注册并控制页面', sw.active && sw.controlled, JSON.stringify(sw));
 
 // 2) Chrome 可安装性错误

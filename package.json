@@ -19,6 +19,7 @@
     "budget": "node tools/check-budget.mjs",
     "xss": "node tools/check-xss.mjs",
     "render-budget": "node tools/check-render-budget.mjs",
-    "pwa": "node tools/check-pwa.mjs"
+    "pwa": "node tools/check-pwa.mjs",
+    "plan-flow": "node tools/check-plan-flow.mjs"
   }
 }

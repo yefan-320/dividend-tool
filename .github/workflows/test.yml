@@ -34,3 +34,4 @@ jobs:
           node tools/check-render-budget.mjs
           node tools/check-xss.mjs
           node tools/check-pwa.mjs
+          node tools/check-plan-flow.mjs

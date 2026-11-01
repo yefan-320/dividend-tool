@@ -183,13 +183,32 @@ function dataPanel() {
   </section>`;
 }
 
+/** 行情快照距今天数（按自然日）；无/异常日期返回 null */
+function quoteAgeDays() {
+  const g = db.generated;
+  if (!g || !/^\d{4}-\d{2}-\d{2}$/.test(g)) return null;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const d = new Date(g + 'T00:00:00');
+  return Math.round((today - d) / 86400000);
+}
+
+/** 数据新鲜度徽标：超过 7 天标黄提醒更新 */
+function dataAgeBadge() {
+  const age = quoteAgeDays();
+  if (age == null) return '';
+  const stale = age > 7;
+  const text = age <= 0 ? '行情最新' : `行情 ${age} 天前`;
+  return `<span class="data-age${stale ? ' stale' : ''}" title="行情快照 ${esc(db.generated)}${stale ? '，超过 7 天未更新，建议刷新数据' : ''}">${text}</span>`;
+}
+
 export function renderToday() {
   const cands = candidates();
   const p = portfolio();
   return `<div class="page-head fade-in">
     <div>
       <h1 class="page-title">今天</h1>
-      <div class="page-sub">${esc(db.generated || '2026-10-30')} 收盘 <span class="dim">·</span> ${dot()} 真实行情 · 财报 ${dataMeta().finCount} 只</div>
+      <div class="page-sub">${esc(db.generated || '2026-10-30')} 收盘 <span class="dim">·</span> ${dot()} 真实行情 · 财报 ${dataMeta().finCount} 只 · ${dataAgeBadge()}</div>
     </div>
     <div class="page-actions">
       <button class="theme-toggle" id="themeBtn" title="切换深浅色">${icon('sun')}</button>
