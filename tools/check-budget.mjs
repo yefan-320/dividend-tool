@@ -65,7 +65,7 @@ const shellBlock = (sw.match(/const SHELL = \[([\s\S]*?)\];/) || [])[1] || '';
 const shellList = [...shellBlock.matchAll(/'([^']+)'/g)].map((m) => m[1]);
 // monthly / finance-history / finance-extra 体积大且只在不常用页按需用，不进预缓存；
 // echarts 1MB 也不进安装预缓存，改由 WARM 暖缓存（否则「装好即离线可用」要多等约 40%）
-const mustNotPrecache = ['data/monthly.json', 'data/finance-history.json', 'data/finance-extra.json', 'vendor/echarts.min.js'];
+const mustNotPrecache = ['data/monthly.json', 'data/fin/index.json', 'data/finance-extra.json', 'vendor/echarts.min.js'];
 const mustPrecache = ['data/quotes.json', 'data/baseline.json', 'data/finance-core.json', 'data/benchmark.json', './src/main.js'];
 // 暖缓存：SW 里声明 + 页面空闲时发消息补下载
 const warmBlock = (sw.match(/const WARM = \[([\s\S]*?)\];/) || [])[1] || '';
@@ -83,7 +83,7 @@ console.log('  外壳 JS/CSS（' + shellItems.length + ' 个文件）'.padEnd(26
 console.log('  首屏合计（含图标）'.padEnd(30) + fmt(firstLoadKB) + ' / ' + BUDGET.firstLoadKB + 'KB');
 console.log('  懒加载：echarts ' + fmt(gzipSize('vendor/echarts.min.js') / 1024) +
   ' · monthly ' + fmt(gzipSize('data/monthly.json') / 1024) +
-  ' · finance-history ' + fmt(gzipSize('data/finance-history.json') / 1024));
+  ' · 财报分片 ' + fmt(gzipSize('data/fin/index.json') / 1024) + '（索引，分片按需）');
 
 if (coreKB > BUDGET.coreDataKB) problems.push(`首屏核心数据 ${fmt(coreKB)} 超预算 ${BUDGET.coreDataKB}KB`);
 if (shellKB > BUDGET.shellKB) problems.push(`外壳 JS/CSS ${fmt(shellKB)} 超预算 ${BUDGET.shellKB}KB`);

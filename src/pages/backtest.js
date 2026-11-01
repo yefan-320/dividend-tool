@@ -128,7 +128,7 @@ function monthlyFromSeries(series) {
   return out;
 }
 
-async function loadMarket(codes, from, to, { finance = false, monthly = 'auto', marketWide = false } = {}) {
+async function loadMarket(codes, from, to, { finance = false, monthly = 'auto', marketWide = false, stockCode = null } = {}) {
   const dailyMeta = await loadDailyMeta();
   // 日 K 日历覆盖到 2014-06 起。起点落在日 K 范围内、又不需要全市场选股时，一个月的月线都不拉：
   //  · 起点早于 2014-06（要月线补早期价格）
@@ -136,7 +136,13 @@ async function loadMarket(codes, from, to, { finance = false, monthly = 'auto', 
   // 只有这两种情况才下 6.2MB。monthly===false 可强制不拉。
   const useMonthly = monthly !== false && (from < dailyMeta.cal[0] || marketWide);
   const [monthsFull, index] = await Promise.all([useMonthly ? loadMonthly() : Promise.resolve(null), loadIndexDaily()]);
-  const finHistory = finance ? await loadFinanceHistory() : null;
+  // 历年财报也按需：个股回测只拉目标股那一片（几 KB），不再下 1.9MB 的整包；
+  // 只有对比模式的红利策略选股才需要全市场财报。拉不到就降级（不做质量筛选），不报错、不白屏。
+  let finHistory = null;
+  if (finance) {
+    const finCodes = marketWide ? null : (stockCode ? [stockCode] : codes);
+    finHistory = await loadFinanceHistory(finCodes);
+  }
   const daily = await loadDailyMany(codes);
   const series = new Map();
   for (const c of codes) series.set(c, buildSeries({ cal: dailyMeta.cal, daily: daily.get(c), monthly: monthsFull ? monthsFull[c] : null }));
@@ -797,6 +803,7 @@ export async function renderBacktest() {
     finance: needFinance,
     monthly: 'auto',
     marketWide: btState.mode === 'cmp',
+    stockCode: btState.mode === 'stock' ? btState.stock : null,
   });
   const bench = benchRows(market.index, db.benchmark, clampFrom(btState.from), btState.to);
   const lv = lowVolRows(market.index, clampFrom(btState.from), btState.to);
@@ -868,6 +875,11 @@ export async function renderBacktest() {
     body = renderPort(market, s);
   }
 
+  // 财报拉不全（慢网断流）时不白屏：用不含质量筛选的结果继续跑，并在顶部说明
+  const finWarn = market.finHistory && db.finDegraded
+    ? `<div class="banner warn" style="margin:0 0 12px">历史财报只拉到一部分（慢网断流），本次回测<b>未启用质量筛选</b>，数值会略有差异。刷新一次可补下其余分片。</div>`
+    : '';
+
   return `<div class="page-head fade-in">
     <div>
       <h1 class="page-title">回测</h1>
@@ -875,7 +887,7 @@ export async function renderBacktest() {
     </div>
     <div class="page-actions">${modeTabs()}</div>
   </div>
-  ${body}`;
+  ${finWarn}${body}`;
 }
 
 /* ---------------- 渲染后绑定 ---------------- */

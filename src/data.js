@@ -20,15 +20,30 @@ export const db = {
   monthly: null,    // {code:[[ym,close]]}
   finance: null,    // {code:[eps,roe,nm,liab,ocfps,np]} 最近年报
   finYear: null,
-  finHistory: null, // {code:[[year,eps,roe,nm,liab,ocfps],...]}
+  finHistory: null, // {code:[[year,eps,roe,nm,liab,ocfps],...]}（按分片累积）
+  finDegraded: false, // 财报分片有拉失败的（慢网断流）→ 回测降级为不做质量筛选
   financeExtraLoaded: false, // 个股页按需加载的净利率/负债率/净利润是否已合并
   generated: '',
 };
 
-async function getJson(f) {
-  const res = await fetch(dataUrl(f), { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`${f} HTTP ${res.status}`);
-  return res.json();
+/**
+ * 取 JSON。慢网下大文件会断流，所以带超时 + 一次重试；
+ * 仍然失败就把原始错误抛给调用方，由调用方决定降级还是报错。
+ */
+async function getJson(f, { timeout = 20000, retry = 1 } = {}) {
+  let last;
+  for (let i = 0; i <= retry; i++) {
+    try {
+      const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(timeout) : undefined;
+      const res = await fetch(dataUrl(f), { cache: 'no-cache', signal });
+      if (!res.ok) throw new Error(`${f} HTTP ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      last = e;
+      if (i < retry) await new Promise((r) => setTimeout(r, 400));
+    }
+  }
+  throw last;
 }
 
 /** 核心财务 [eps,roe,ocfps] → 统一 6 槽数组；兼容旧的 finance-current 6 槽格式 */
@@ -89,15 +104,51 @@ export async function loadFinanceExtra() {
   return financeExtraPromise;
 }
 
-export async function loadFinanceHistory() {
-  if (db.finHistory) return db.finHistory;
-  try {
-    const j = await getJson('finance-history.json');
-    db.finHistory = j.data || {};
-  } catch (e) {
-    throw new Error('历史财报数据没加载成功（离线时需先联网打开过一次回测）。原始错误：' + e.message);
+/* ---------------- 历年财报：按代码前 4 位分片按需拉 ---------------- */
+
+/** 已经装进 db.finHistory 的分片（前 4 位）。按需拉过的片不再重复下。 */
+const finShards = new Set();
+let finIndexPromise = null;
+
+/**
+ * 历年财报 {code: [[year,eps,roe,nm,liab,ocfps],...]}。
+ *
+ * 传 codes → 只拉这些股票所在的分片（个股回测只拉 1 片 ≈ 5KB，不再是整包 1.9MB）；
+ * 不传     → 拉全部 93 片（对比模式的全市场选股才需要）。
+ * 任何一片失败都不抛错：返回已经拿到的部分，把 db.finDegraded 置 true，由页面提示降级。
+ */
+export async function loadFinanceHistory(codes = null) {
+  db.finHistory = db.finHistory || {};
+  let keys;
+  if (codes && codes.length) {
+    keys = [...new Set(codes.map((c) => String(c).slice(0, 4)))].filter((k) => /^\d{4}$/.test(k));
+  } else {
+    if (!finIndexPromise) finIndexPromise = getJson('fin/index.json', { timeout: 15000 }).catch(() => null);
+    const idx = await finIndexPromise;
+    keys = idx && Array.isArray(idx.shards) ? idx.shards.slice() : null;
+    if (!keys) { db.finDegraded = true; return db.finHistory; }
+  }
+  const todo = keys.filter((k) => !finShards.has(k));
+  if (!todo.length) return db.finHistory;
+
+  // 分片很小，但一次开 93 条也过火：按 6 条一批并发
+  for (let i = 0; i < todo.length; i += 6) {
+    await Promise.all(todo.slice(i, i + 6).map(async (k) => {
+      try {
+        const part = await getJson(`fin/${k}.json`, { timeout: 15000 });
+        Object.assign(db.finHistory, part);
+        finShards.add(k);
+      } catch (e) {
+        db.finDegraded = true;
+      }
+    }));
   }
   return db.finHistory;
+}
+
+/** 财报是否拉全过（对比模式的全市场选股需要） */
+export function financeHistoryComplete() {
+  return !db.finDegraded && finShards.size > 0;
 }
 
 /** 最近年报财务：{eps, roe, nm, liab, ocfps, np, year}，没有返回 null */

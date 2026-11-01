@@ -1,11 +1,19 @@
 /* 红利工具 Service Worker：应用外壳预缓存 + 数据 stale-while-revalidate。
-   代码更新时把 VERSION 加一（v1.0.0 → v1.0.1）即可让旧缓存失效。
+
+   ⚠ 两级缓存，别再合并回一个：
+     · SHELL_CACHE —— 代码壳（html/js/css/图标）。改代码升这个号。
+     · DATA_CACHE  —— 数据（data/**、vendor/**）。只有数据格式变了才升。
+   以前一个 VERSION 管所有：改一行代码就把用户机器上几 MB 数据全清了，
+   下次打开又得重下财报/日 K/月线（实测重下要 80 秒）。分开之后改代码不再动数据。
 
    图表库（echarts 原始 1MB / gzip 约 326KB）不放进安装预缓存：
    首屏和离线外壳都不需要它，放进 SHELL 会让「装好、离线可用」多等约 40% 的下载。
    改由页面空闲时发 warm-charts 消息补缓存（见 WARM / warmAll），
    没补上也不影响在线画图——外壳的 fetch 处理器会把首次取到的文件顺手缓存。 */
-const VERSION = 'hongli-v1.0.2';
+const SHELL_CACHE = 'hongli-shell-v1.1.0';
+const DATA_CACHE = 'hongli-data-v1';
+/** 数据和代码分开放；数据量大又天天变，不该被代码改版连坐 */
+const cacheNameFor = (u) => (/\/data\//.test(u) || /\/vendor\//.test(u) ? DATA_CACHE : SHELL_CACHE);
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './styles/tokens.css', './styles/base.css', './styles/components.css', './styles/pages.css',
@@ -24,7 +32,7 @@ const SHELL = [
 const WARM = ['./vendor/echarts.min.js'];
 
 async function warmAll(list) {
-  const cache = await caches.open(VERSION);
+  const cache = await caches.open(DATA_CACHE);
   await Promise.allSettled(list.map(async (u) => {
     const abs = new URL(u, self.registration.scope).href;
     if (await cache.match(abs)) return;
@@ -34,8 +42,11 @@ async function warmAll(list) {
 
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {
-    const cache = await caches.open(VERSION);
-    await Promise.allSettled(SHELL.map((u) => cache.add(new Request(u, { cache: 'reload' }))));
+    // 按目标分组写进各自的 cache，不要一股脑塞进一个
+    await Promise.allSettled(SHELL.map(async (u) => {
+      const cache = await caches.open(cacheNameFor(u));
+      await cache.add(new Request(u, { cache: 'reload' }));
+    }));
     self.skipWaiting();
   })());
 });
@@ -43,7 +54,8 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k)));
+    // 只清掉不是当前这两级的旧 cache（含旧版单层 hongli-v1.0.x）
+    await Promise.all(keys.filter((k) => k !== SHELL_CACHE && k !== DATA_CACHE).map((k) => caches.delete(k)));
     await self.clients.claim();
     // 尽力而为：不放进 waitUntil，避免把「激活完成」拖到 326KB 之后；
     // 常规路径是页面空闲时发 warm-charts 消息（那时 SW 一定已激活）。
@@ -64,7 +76,7 @@ self.addEventListener('fetch', (e) => {
   // 数据：先给缓存，同时后台更新（离线可用、在线最终一致）
   if (url.pathname.includes('/data/')) {
     e.respondWith((async () => {
-      const cache = await caches.open(VERSION);
+      const cache = await caches.open(cacheNameFor(url.pathname));
       const hit = await cache.match(req);
       const net = fetch(req).then((res) => { if (res.ok) cache.put(req, res.clone()); return res; }).catch(() => null);
       return hit || (await net) || new Response('{}', { status: 503, headers: { 'Content-Type': 'application/json' } });
@@ -74,7 +86,7 @@ self.addEventListener('fetch', (e) => {
 
   // 外壳：缓存优先，后台更新
   e.respondWith((async () => {
-    const cache = await caches.open(VERSION);
+    const cache = await caches.open(cacheNameFor(url.pathname));
     // ignoreSearch：?theme=light 之类入口参数不影响拿到缓存的外壳（否则离线启动白屏）
     const hit = await cache.match(req, { ignoreSearch: true });
     const net = fetch(req).then((res) => { if (res.ok && res.type === 'basic') cache.put(req, res.clone()); return res; }).catch(() => null);
