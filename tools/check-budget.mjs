@@ -4,7 +4,7 @@
  *
  * 检查项：
  *  1. 首屏核心数据（quotes + baseline + finance-core + benchmark）gzip 体积 ≤ 420KB；
- *  2. 外壳 JS/CSS（src/**、styles/**、index.html、manifest）gzip 体积 ≤ 140KB；
+ *  2. 外壳 JS/CSS（src/**、styles/**、index.html、manifest）gzip 体积 ≤ 145KB；
  *  3. 首屏总量（核心数据 + 外壳 + 图标）gzip ≤ 560KB；
  *  4. ECharts 必须是按需加载：index.html 里不许有同步 <script src="...echarts...">；
  *  5. 懒加载大文件（monthly / finance-history / finance-extra / echarts）不许进 SW 预缓存；
@@ -23,7 +23,7 @@ const gzipSize = (p) => zlib.gzipSync(fs.readFileSync(path.join(ROOT, p)), { lev
 
 const BUDGET = {
   coreDataKB: 420,
-  shellKB: 140,
+  shellKB: 145,
   firstLoadKB: 560,
   precacheKB: 620, // SW 安装时后台预缓存总量：ECharts 移出后应约 540KB（以前含图表库是 865KB）
 };

@@ -205,3 +205,143 @@ export function runStockBacktest(o) {
 function daysBetween(a, b) {
   return Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 86400000));
 }
+
+/**
+ * 定投回测（个股页用这个）：**不判断买卖点**。
+ *
+ * 规则只有三条：
+ *   1. 第一天把首次本金全买进去
+ *   2. 每年 4 月末 / 12 月末各入账 6 个月的追加额，当天全买进去
+ *   3. 每年 4 月末分红到账，当天再投进去（红利再投资）
+ *
+ * 不设股息率门槛、不看财报、不因为分红下调卖出——一分钱都不卖。
+ * 对照口径（navHold）是同一笔本金第一天买入、追加照投但不复利、分红进现金不进股。
+ */
+export function runInvestBacktest(o) {
+  const { code, series, dividends = {}, capital = 1000000, monthlyAdd = 0, from, to } = o;
+  const all = o.dates || [];
+  let lo = 0;
+  let hi = all.length - 1;
+  if (from) { const i = all.findIndex((d) => d >= from); if (i >= 0) lo = i; }
+  if (to) { for (let i = all.length - 1; i >= lo; i--) { if (all[i] <= to) { hi = i; break; } } }
+  const dates = lo <= hi ? all.slice(lo, hi + 1) : all;
+
+  const px = (d) => priceAt(series, d) || 0;
+  const nav = [];
+  const trades = [];
+  const divByY = {};
+  const yearly = [];
+  const flows = [];
+  let shares = 0;
+  let cash = 0;          // 凑不满 100 股的零钱
+  let totalIn = 0;
+  let totalDiv = 0;
+  let yearNav0 = 0;
+  let yearDiv = 0;
+  let yearIn = 0;
+  let lastYear = null;
+
+  // 第一天：首次本金全买
+  const d0 = dates[0];
+  if (d0) {
+    const p0 = px(d0);
+    const n0 = p0 > 0 ? Math.floor(capital / p0 / 100) * 100 : 0;
+    shares = n0;
+    cash = capital - n0 * p0;
+    totalIn = capital;
+    flows.push([d0, -capital]);
+    trades.push({ date: d0, type: '建仓', shares: n0, price: p0, amount: capital, why: '首次本金全买' });
+  }
+
+  for (let i = 0; i < dates.length; i++) {
+    const date = dates[i];
+    const y = Number(date.slice(0, 4));
+    const monthEndDay = isMonthEnd(dates, i);
+    const mm = date.slice(5, 7);
+    const isAprEnd = monthEndDay && mm === '04';
+    const isDecEnd = monthEndDay && mm === '12';
+
+    if (lastYear != null && y !== lastYear) {
+      yearly.push({ year: lastYear, nav0: yearNav0, nav1: nav[i - 1]?.[1] ?? null, div: yearDiv, cash, invest: yearIn });
+      yearNav0 = nav[i - 1]?.[1] ?? yearNav0;
+      yearDiv = 0;
+      yearIn = 0;
+    }
+    lastYear = y;
+
+    // 追加：4/12 月末各入 6 个月，跟组合回测、中证红利基准同一口径
+    if (i > 0 && monthlyAdd > 0 && (isAprEnd || isDecEnd)) {
+      const amt = monthlyAdd * 6;
+      cash += amt;
+      totalIn += amt;
+      yearIn += amt;
+      flows.push([date, -amt]);
+      const p = px(date);
+      const n = p > 0 ? Math.floor(cash / p / 100) * 100 : 0;
+      if (n > 0) {
+        shares += n;
+        cash -= n * p;
+        trades.push({ date, type: '定投', shares: n, price: p, amount: n * p, why: `追加 ${(amt / 10000).toFixed(1)} 万` });
+      }
+    }
+
+    // 分红：4 月末到账，当天再投
+    if (isAprEnd && shares > 0) {
+      const dps = prevDps(dividends, code, y);
+      if (dps > 0) {
+        const amt = shares * dps;
+        totalDiv += amt;
+        divByY[y] = (divByY[y] || 0) + amt;
+        yearDiv += amt;
+        cash += amt;
+        const p = px(date);
+        const n = p > 0 ? Math.floor(cash / p / 100) * 100 : 0;
+        if (n > 0) {
+          shares += n;
+          cash -= n * p;
+          trades.push({ date, type: '分红复投', shares: n, price: p, amount: n * p, dps, why: `${y - 1} 年度分红 ${(amt / 10000).toFixed(2)} 万，当天买回` });
+        } else {
+          trades.push({ date, type: '分红', amount: amt, dps, why: `${y - 1} 年度分红 ` + (amt / 10000).toFixed(2) + ' 万，不够一手，留在现金' });
+        }
+      }
+    }
+
+    nav.push([date, shares * px(date) + cash]);
+  }
+
+  if (lastYear != null) {
+    yearly.push({ year: lastYear, nav0: yearNav0, nav1: nav[nav.length - 1]?.[1] ?? null, div: yearDiv, cash, invest: yearIn });
+  }
+
+  const end = nav.length ? nav[nav.length - 1][1] : capital;
+  // 一次性投入时没有现金流，XIRR 无定义，退回复利折算
+  const cagr = flows.length > 1
+    ? xirr(flows.concat([[nav[nav.length - 1][0], end]]))
+    : (capital > 0 ? annualize(end / capital - 1, from, to) : null);
+  const retFund = totalIn > 0 ? end / totalIn - 1 : null;
+  const ddStat = maxDrawdown(nav);
+  const bench = o.benchmarkSeries
+    ? buildBenchmark({ dates, rows: o.benchmarkSeries, capital, monthlyAdd, from, to, flows: flows.length > 1 })
+    : null;
+
+  return {
+    code, from, to, dates, nav, trades, divByY, yearly,
+    totalDiv, totalIn, end, shares, cash, lastPrice: dates.length ? px(dates[dates.length - 1]) : 0,
+    stats: {
+      retFund,
+      cagr,
+      mdd: ddStat.mdd,
+      mddPeak: ddStat.mddPeak,
+      mddTrough: ddStat.mddTrough,
+      sharpe: sharpeOf(nav),
+      buys: trades.filter((t) => t.type === '定投').length,
+      reinvest: trades.filter((t) => t.type === '分红复投').length,
+      benchCagr: bench ? bench.cagr : null,
+      benchEnd: bench ? bench.end : null,
+      excess: bench && cagr != null && bench.cagr != null ? cagr - bench.cagr : null,
+      years: daysBetween(from, to) / 365.25,
+    },
+    bench,
+    mode: 'invest',
+  };
+}

@@ -10,7 +10,7 @@ import {
 } from '../data.js';
 import { buildSeries, buildTradingDates, monthEnd, priceAt, maxDrawdown, prevDps } from '../engine/market.js';
 import { runPortfolioBacktest } from '../engine/portfolioBacktest.js';
-import { runStockBacktest } from '../engine/stockBacktest.js';
+import { runStockBacktest, runInvestBacktest } from '../engine/stockBacktest.js';
 import { runPlanBacktest } from '../engine/backtest.js';
 import { entryLabel } from '../engine/plan.js';
 import { loadTxs, loadCash, loadPlans, savePlan, loadSettings } from '../store.js';
@@ -246,7 +246,6 @@ function paramBar(opts = {}) {
       <label class="bt-field"><span>月追加(元)</span><input class="input" type="number" id="btMon" min="0" step="500" value="${btState.monthlyAdd}"></label>
       ${opts.minDy ? `<label class="bt-field"><span>买入股息率≥</span><input class="input" type="number" id="btMinDy" min="0" max="10" step="0.5" value="${btState.minDy}"></label>` : ''}
       ${opts.quality ? `<label class="bt-field bt-check"><input type="checkbox" id="btQuality"${btState.quality ? ' checked' : ''}><span>质量筛选（加载财报，较慢）</span></label>` : ''}
-      <button class="btn primary" id="btRun" style="margin-left:auto">${icon('refresh')} 重跑</button>
     </div>
     <div class="bt-param-row" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
       <span class="bt-hint">快捷区间</span>
@@ -254,8 +253,11 @@ function paramBar(opts = {}) {
       <span class="bt-hint" style="margin-left:12px">月追加快捷</span>
       ${[0, 5000, 10000, 20000].map((v) => `<button class="bt-chip ${btState.monthlyAdd === v ? 'on' : ''}" data-add="${v}">${v === 0 ? '不追加' : v / 1000 + '千'}</button>`).join('')}
       ${tabs}
+      <button class="btn primary" id="btRun" style="margin-left:auto">${icon('refresh')} 重跑</button>
     </div>
-    <div class="bt-hint" style="margin-top:8px">日级净值 · 价格不复权 · 分红 4 月末到账 · 未上市股票份额先摊给已上市、上市满 6 个月建仓 · 不含税 · 行情 <b>${esc(todayStr())}</b> · 日 K 自 ${esc(dailyStart())}（更早用月线）</div>
+    <div class="bt-hint" style="margin-top:8px">${opts.stock
+      ? `日级净值 · 价格不复权 · 分红 4 月末到账当天再投 · 不判断买卖点（没有卖点）· 不含税 · 行情 <b>${esc(todayStr())}</b> · 日 K 自 ${esc(dailyStart())}（更早用月线）`
+      : `日级净值 · 价格不复权 · 分红 4 月末到账 · 未上市股票份额先摊给已上市、上市满 6 个月建仓 · 不含税 · 行情 <b>${esc(todayStr())}</b> · 日 K 自 ${esc(dailyStart())}（更早用月线）`}</div>
   </section>`;
 }
 
@@ -285,6 +287,24 @@ function fold(id, title, summary, content) {
   </details>`;
 }
 
+function investRules() {
+  const R = [
+    ['建仓', '第一天把首次本金全买进去（按 100 股整手，零头留现金）'],
+    ['定投', btState.monthlyAdd > 0
+      ? `每月 ${bigMoney(btState.monthlyAdd)}，在每年 4 月末 / 12 月末各入账 6 个月，当天全买`
+      : '本次没开定投（月追加 = 0），只有第一天那笔本金'],
+    ['分红', '每年 4 月末到账（上一年度每股分红 × 当时持股），当天按收盘价再买回；不够一手就留在现金里'],
+    ['不判断买卖点', '不设股息率门槛、不看财报、不因为分红下调卖出——一分钱都不卖，也没有卖点'],
+    ['费用', '不含佣金、不含红利税；现金零头不计息'],
+    ['价格', '日 K 不复权，更早的区间用月线月末补齐'],
+    ['基准', '中证红利全收益（H00922），同本金、同定投节奏'],
+  ];
+  return `<div class="table-wrap"><table class="table">
+    <thead><tr><th>项目</th><th>规则</th></tr></thead>
+    <tbody>${R.map(([k, v]) => `<tr><td class="em" style="white-space:nowrap">${esc(k)}</td><td style="text-align:left;white-space:normal">${v}</td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
 function rulesCard() {
   const R = [
     ['买入', '4/12 月末决策：股息率 ≥ 买入线，且质量过关（不亏损、支付率 &lt;85%、现金流覆盖 ≥0.7、ROE ≥5）'],
@@ -302,8 +322,8 @@ function rulesCard() {
 
 function flowTable(events) {
   const rows = [...events].reverse().slice(0, 500).map((e) => {
-    if (e.type === '买入') {
-      return `<tr><td class="num">${esc(e.date)}</td><td class="name">${esc(nameOf(e.code))}<span class="code">${esc(e.code)}</span></td><td class="up">买入</td><td class="num">${num(e.price, 2)}</td><td class="num">${num(e.shares, 0)}</td><td class="num">${((e.shares * e.price) / 10000).toFixed(1)}</td><td class="muted">${esc(e.why || '')}</td></tr>`;
+    if (e.type === '买入' || e.type === '建仓' || e.type === '定投') {
+      return `<tr><td class="num">${esc(e.date)}</td><td class="name">${esc(nameOf(e.code))}<span class="code">${esc(e.code)}</span></td><td class="up">${esc(e.type)}</td><td class="num">${num(e.price, 2)}</td><td class="num">${num(e.shares, 0)}</td><td class="num">${((e.shares * e.price) / 10000).toFixed(1)}</td><td class="muted">${esc(e.why || '')}</td></tr>`;
     }
     if (e.type === '卖出') {
       return `<tr><td class="num">${esc(e.date)}</td><td class="name">${esc(nameOf(e.code))}<span class="code">${esc(e.code)}</span></td><td class="down">卖出</td><td class="num">${num(e.price, 2)}</td><td class="num">${num(e.shares, 0)}</td><td class="num">${((e.shares * e.price) / 10000).toFixed(1)}</td><td class="muted">${esc(e.why || '')}</td></tr>`;
@@ -658,18 +678,17 @@ function renderStockPage(market, structureData) {
   const code = btState.stock;
   const s = market.series.get(code);
   if (!s || !s.dates.length) {
-    return `${paramBar({ tabs: false, minDy: true })}<div class="banner">${esc(code)} 没有日线数据（可能退市/停牌）</div>`;
+    return `${paramBar({ tabs: false, stock: true })}<div class="banner">${esc(code)} 没有日线数据（可能退市/停牌）</div>`;
   }
-  const r = runStockBacktest({
+  /* 个股回测不判断买卖点：本金第一天全买，之后按时定投，分红当天再投。
+     不设股息率门槛、不看财报、不因为分红下调卖出。 */
+  const r = runInvestBacktest({
     code,
     dates: market.dates,
     series: s,
     dividends: db.baseline.dividends || {},
-    finHistory: market.finHistory,
     capital: btState.capital,
     monthlyAdd: btState.monthlyAdd,
-    minDy: btState.minDy,
-    useQuality: btState.quality && !!market.finHistory,
     benchmarkSeries: ctx.benchRows,
     from: clampFrom(btState.from),
     to: btState.to,
@@ -677,28 +696,9 @@ function renderStockPage(market, structureData) {
   ctx.stock = r;
   const st = r.stats;
   const vc = st.cagr >= 0 ? 'up' : 'down';
-  // 买得少 / 一次没买的时候要说清楚为什么，别让人以为「数据不对」
-  const firstBuy = r.trades.find((t) => t.type === '买入');
-  // 只买过一次时，看的是「第一次买入之前」那段的最高股息率——
-  // 拿全区间去说「这几年最高只到 6.2%」，比门槛还高，自己打自己脸
-  const peakDy = rangePeakDy(code, btState.from, st.buys === 1 && firstBuy ? firstBuy.date : btState.to);
-  const idle = st.buys === 0
-    ? `<div class="banner warn block" style="margin:0 0 14px">
-        <b>这 ${num(st.years, 0)} 年一次都没买。</b>
-        ${esc(nameOf(code))} 的股息率最高只到 <b>${num(peakDy, 1)}%</b>，从没碰到 ${num(btState.minDy, 1)}% 的买入线——
-        所以上面这些收益全是<b>现金利息 1.5%/年</b>，一分股票都没买。
-        把「买入股息率≥」调低到 ${peakDy > 0 ? num(Math.max(1, Math.floor(peakDy * 10) / 10), 1) : '4'}% 以下再跑，或者换一只股票。
-      </div>`
-    : st.buys === 1 && firstBuy && Number(firstBuy.date.slice(0, 4)) - Number(String(clampFrom(btState.from)).slice(0, 4)) >= 2
-      ? `<div class="banner block" style="margin:0 0 14px">
-          <b>规则一直等到 ${esc(firstBuy.date)} 才第一次买入。</b>
-          ${esc(nameOf(code))} 在那之前的股息率最高只到 <b>${num(peakDy, 1)}%</b>，第一次够着 ${num(btState.minDy, 1)}% 的线就是那一天。
-          在那之前钱一直吃着 1.5% 的现金利息，所以规则跑不过「第一天就买入」——
-          <b>买入持有 ${bigMoney(r.endHold)}</b> vs 规则 ${bigMoney(r.end)}，差的就是等的这些年。
-        </div>`
-      : '';
+  const perYearAdd = btState.monthlyAdd * 12;
   return `
-  ${paramBar({ tabs: false, minDy: true, quality: true })}
+  ${paramBar({ tabs: false, stock: true })}
   <div class="stock-pick-row">
     <div class="stock-search-wrap">
       <div class="stock-search">${icon('search')}<input id="stSearch" placeholder="换一只：600036 / 招商银行 / 招行" autocomplete="off" spellcheck="false"><kbd>Enter</kbd></div>
@@ -707,45 +707,44 @@ function renderStockPage(market, structureData) {
     <div class="stock-pick-now">${esc(nameOf(code))} <span class="mono">${esc(code)}</span></div>
   </div>
   ${hero({
-    kicker: `个股回测 · ${esc(nameOf(code))} ${esc(code)} · ${clampFrom(btState.from)} → ${btState.to}`,
-    main: `年化 <b class="num gold">${pctSign(st.cagr == null ? null : st.cagr * 100, 1)}</b> <span class="thin">，期末 ${bigMoney(r.end)} · 买入持有 ${pctSign(st.cagrHold == null ? null : st.cagrHold * 100, 1)}</span>`,
-    desc: `买点 ${st.buys} 次 · 卖点 ${st.sells} 次 · 分红 ${bigMoney(r.totalDiv)} · 最大回撤 ${pct(st.mdd * 100, 1)} · vs 中证红利全收益 ${pctSign(st.excess == null ? null : st.excess * 100, 1)}/年`,
+    kicker: `个股定投 · ${esc(nameOf(code))} ${esc(code)} · ${clampFrom(btState.from)} → ${btState.to}`,
+    main: `${bigMoney(r.totalIn)} <span class="thin">→</span> <b class="num gold">${bigMoney(r.end)}</b><span class="thin">，年化 ${pctSign(st.cagr == null ? null : st.cagr * 100, 1)}</span>`,
+    desc: `不判断买卖点：第一天全买，${perYearAdd > 0 ? `每月追 ${bigMoney(perYearAdd / 12)}，` : '不再追加，'}分红当天再投 · 累计卖出 0 次`,
     stats: [
-      { k: '累计收益', v: pctSign(st.ret * 100, 1), cls: vc, s: `${num(st.years, 1)} 年` },
-      { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: btState.monthlyAdd > 0 ? 'XIRR 资金加权' : '复利折算' },
-      { k: '最大回撤', v: pct(st.mdd * 100, 1), cls: 'down', s: `${esc(st.mddPeak)} → ${esc(st.mddTrough)}` },
-      { k: '分红', v: bigMoney(r.totalDiv), cls: 'gold', s: `年化股息 ${pct((r.totalDiv / Math.max(1, st.years) / btState.capital) * 100, 1)}` },
+      { k: '累计投入', v: bigMoney(r.totalIn), s: perYearAdd > 0 ? `${num(st.years, 1)} 年 · 含定投 ${bigMoney(r.totalIn - btState.capital)}` : `${num(st.years, 1)} 年 · 一次性` },
+      { k: '期末', v: bigMoney(r.end), cls: vc, s: `${num(r.shares, 0)} 股 + 零钱 ${bigMoney(r.cash)}` },
+      { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: perYearAdd > 0 ? 'XIRR 资金加权' : '复利折算' },
+      { k: '分红', v: bigMoney(r.totalDiv), cls: 'gold', s: `全部再投，滚了 ${st.reinvest} 次` },
     ],
   })}
-  ${idle}
 
   <section class="panel fade-in" style="margin-top:14px">
-    <div class="panel-head"><span class="panel-title">净值曲线</span><span class="section-note">规则 vs 买入持有 vs 中证红利全收益 · 下方是回撤</span></div>
+    <div class="panel-head"><span class="panel-title">净值曲线</span><span class="section-note">一直买入并持有 vs 中证红利全收益 · 下方是回撤</span></div>
     <div class="panel-body" style="padding:8px 10px 4px"><div id="stNav" class="chart" style="height:380px"></div></div>
   </section>
 
   ${metricGrid([
-    { k: '期末', v: bigMoney(r.end), s: '现金 + 持仓', key: 'nav', on: btState.metric === 'nav' || !btState.metric },
-    { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: 'XIRR / 复利', key: 'ann' },
+    { k: '期末', v: bigMoney(r.end), s: '持仓市值 + 零钱', key: 'nav', on: btState.metric === 'nav' || !btState.metric },
+    { k: '累计投入', v: bigMoney(r.totalIn), s: perYearAdd > 0 ? `本金 + 定投 ${bigMoney(r.totalIn - btState.capital)}` : '只有本金', key: 'fund' },
+    { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: perYearAdd > 0 ? 'XIRR 资金加权' : '复利折算', key: 'ann' },
     { k: '最大回撤', v: pct(st.mdd * 100, 1), cls: 'down', s: `${esc(st.mddPeak)} → ${esc(st.mddTrough)}`, key: 'dd' },
-    { k: '分红', v: bigMoney(r.totalDiv), cls: 'gold', s: '累计到账', key: 'div' },
-    { k: '买入持有', v: bigMoney(r.endHold), s: `年化 ${pctSign(st.cagrHold == null ? null : st.cagrHold * 100, 1)}`, key: 'hold' },
+    { k: '分红', v: bigMoney(r.totalDiv), cls: 'gold', s: `再投 ${st.reinvest} 次，一分没取`, key: 'div' },
     { k: 'vs 指数', v: pctSign(st.excess == null ? null : st.excess * 100, 1), cls: upDown(st.excess), s: 'vs 中证红利全收益', key: 'bench' },
   ])}
   <div id="metricDetail" style="margin-top:12px"></div>
 
-  ${fold('kline', '日 K · 买卖点 / 分红', `收盘线 + MA20/MA60 · 红▲买入 绿▼卖出 金◆分红 · ${r.trades.length} 笔操作`, '<div class="panel-body" style="padding:8px 10px 4px"><div id="stChart" class="chart" style="height:380px"></div></div>')}
+  ${fold('kline', '日 K · 建仓 / 分红复投', `收盘线 + MA20/MA60 · 红▲买入 金◆分红复投 · 不卖，所以没有卖点`, '<div class="panel-body" style="padding:8px 10px 4px"><div id="stChart" class="chart" style="height:380px"></div></div>')}
 
   <section class="panel fade-in" style="margin-top:14px">
-    <div class="panel-head"><span class="panel-title">年度收益</span><span class="section-note">规则净值 / 分红 / 年末现金</span></div>
+    <div class="panel-head"><span class="panel-title">年度收益</span><span class="section-note">年末市值 / 当年分红 / 当年追加</span></div>
     <div class="table-wrap"><table class="table">
-      <thead><tr><th>年</th><th>年初(万)</th><th>年末(万)</th><th>规则收益</th><th>分红(万)</th><th>年末现金(万)</th></tr></thead>
-      <tbody>${r.yearly.map((y) => `<tr><td class="num">${y.year}</td><td class="num">${(y.nav0 / 10000).toFixed(1)}</td><td class="num">${(y.nav1 / 10000).toFixed(1)}</td><td class="num ${upDown(y.nav1 / y.nav0 - 1)}">${pctSign((y.nav1 / y.nav0 - 1) * 100, 1)}</td><td class="num">${(y.div / 10000).toFixed(2)}</td><td class="num">${(y.cash / 10000).toFixed(1)}</td></tr>`).join('')}</tbody>
+      <thead><tr><th>年</th><th>年初(万)</th><th>年末(万)</th><th>当年收益</th><th>分红(万)</th><th>追加(万)</th></tr></thead>
+      <tbody>${r.yearly.map((y) => `<tr><td class="num">${y.year}</td><td class="num">${(y.nav0 / 10000).toFixed(1)}</td><td class="num">${(y.nav1 / 10000).toFixed(1)}</td><td class="num ${upDown(y.nav1 / y.nav0 - 1)}">${pctSign((y.nav1 / y.nav0 - 1) * 100, 1)}</td><td class="num">${(y.div / 10000).toFixed(2)}</td><td class="num">${(y.invest / 10000).toFixed(1)}</td></tr>`).join('')}</tbody>
     </table></div>
   </section>
 
-  ${fold('flow', '交易流水', `${r.trades.length} 笔 · 每笔带依据`, flowTable(r.trades))}
-  ${fold('rules', '本次回测规则', '8 条 · 可审计', rulesCard())}`;
+  ${fold('flow', '买入流水', `${r.trades.length} 笔 · 每一次买入的日期、股数、价格`, flowTable(r.trades))}
+  ${fold('rules', '本次回测规则', '4 条 · 可审计', investRules())}`;
 }
 
 /* ---------------- 组合对比 ---------------- */
@@ -1155,7 +1154,7 @@ function readParams() {
 function drawStockPageCharts() {
   const r = ctx.stock;
   // 净值曲线是重点，直接画；日 K 在折叠里，展开时才画（见 bindBacktest 的 toggle）
-  drawNavChart(document.getElementById('stNav'), { nav: r.nav, bench: r.bench, dd: drawdownOf(r.nav), hold: r.navHold, capital: btState.capital });
+  drawNavChart(document.getElementById('stNav'), { nav: r.nav, bench: r.bench, dd: drawdownOf(r.nav), capital: btState.capital });
   const klineFold = document.querySelector('[data-fold="kline"]');
   if (klineFold && klineFold.open) drawStockKline();
 }
@@ -1166,7 +1165,8 @@ function drawStockKline() {
   const daily = ctx.market.daily.get(btState.stock);
   const marks = [];
   for (const t of r.trades) {
-    if (t.type === '买入' || t.type === '卖出') marks.push({ date: t.date, price: t.price, kind: t.type === '买入' ? 'buy' : 'sell', why: t.why });
+    if (t.type === '建仓' || t.type === '定投') marks.push({ date: t.date, price: t.price, kind: 'buy', why: t.why });
+    else if (t.type === '分红复投' || t.type === '分红') marks.push({ date: t.date, price: t.price, kind: 'div', why: t.why });
   }
   const candleRows = [];
   if (daily && daily.cal && daily.cal.length) {
@@ -1215,38 +1215,49 @@ function renderStockMetric(key) {
     document.getElementById('stNav')?.closest('section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
-  const cap = btState.capital;
-  const nav0 = r.nav[0]?.[1] || cap;
+  const perYearAdd = btState.monthlyAdd * 12;
   const navW = (arr) => arr.map(([d, v]) => [d, +(v / 10000).toFixed(1)]);
-  const benchW = (r.bench?.rows || []).map(([d, v]) => [d, +(v / 10000).toFixed(1)]);
-  const holdW = navW(r.navHold || []);
-  const base = (title, note, extra = '') => `<section class="panel"><div class="panel-head"><span class="panel-title">${title}</span><span class="section-note">${note}</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="msChart" class="chart" style="height:300px"></div></div>${extra}</section>`;
+  const base = (title, note) => `<section class="panel"><div class="panel-head"><span class="panel-title">${title}</span><span class="section-note">${note}</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="msChart" class="chart" style="height:300px"></div></div></section>`;
   let html = '';
   let drawFn = null;
-  const wan = (arr) => arr.map(([d, v]) => [d, +(v / 10000).toFixed(1)]);
-  if (key === 'nav') {
-    html = base('总资产曲线', '现金 + 持仓市值');
-    drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [{ name: '总资产(万)', rows: navW(r.nav), color: '#d8a84e' }], { yFmt: (v) => v.toFixed(0) });
+  if (key === 'fund') {
+    html = base('累计投入', '本金 + 每次定投，逐笔累加');
+    drawFn = () => {
+      let acc = 0;
+      const rows = r.nav.map(([d]) => [d, 0]);
+      // 累计投入曲线：按交易把这笔钱加上去
+      const byDate = new Map();
+      for (const t of r.trades) {
+        const amt = t.type === '建仓' ? btState.capital : t.type === '定投' ? t.amount : 0;
+        if (amt > 0) byDate.set(t.date, (byDate.get(t.date) || 0) + amt);
+      }
+      acc = 0;
+      const out = r.nav.map(([d]) => { acc += byDate.get(d) || 0; return [d, +(acc / 10000).toFixed(1)]; });
+      drawMultiLineChart(document.getElementById('msChart'), [{ name: '累计投入(万)', rows: out, color: '#5b9cf5' }], { yFmt: (v) => v.toFixed(0) });
+    };
   } else if (key === 'ann') {
-    html = base('累计收益', '(净值 ÷ 本金 − 1)');
-    drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [{ name: '累计收益%', rows: r.nav.map(([d, v]) => [d, +((v / cap - 1) * 100).toFixed(1)]), color: '#d8a84e' }], { yFmt: (v) => v.toFixed(0) + '%' });
+    html = base('收益 vs 投入', '总资产 ÷ 累计投入 − 1');
+    drawFn = () => {
+      const byDate = new Map();
+      for (const t of r.trades) {
+        const amt = t.type === '建仓' ? btState.capital : t.type === '定投' ? t.amount : 0;
+        if (amt > 0) byDate.set(t.date, (byDate.get(t.date) || 0) + amt);
+      }
+      let acc = 0;
+      const out = r.nav.map(([d, v]) => { acc += byDate.get(d) || 0; return [d, acc > 0 ? +((v / acc - 1) * 100).toFixed(1) : 0]; });
+      drawMultiLineChart(document.getElementById('msChart'), [{ name: '相对投入的盈亏%', rows: out, color: '#d8a84e' }], { yFmt: (v) => v.toFixed(0) + '%' });
+    };
   } else if (key === 'dd') {
     html = base('回撤（水下）', '距历史最高点');
     drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [{ name: '回撤%', rows: drawdownOf(r.nav), color: '#ef5b60' }], { yFmt: (v) => v.toFixed(0) + '%' });
   } else if (key === 'div') {
-    html = base('年度分红', '每年 4 月末到账');
+    html = base('年度分红', '每年 4 月末到账，当天再买回');
     drawFn = () => drawDivChart(document.getElementById('msChart'), r.divByY);
-  } else if (key === 'hold') {
-    html = base('规则 vs 买入持有', '同一本金、同一区间');
-    drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [
-      { name: '规则净值', rows: navW(r.nav), color: '#d8a84e' },
-      { name: '买入持有', rows: holdW, color: '#5b9cf5', opacity: 0.85 },
-    ], { yFmt: (v) => v.toFixed(0) });
   } else if (key === 'bench') {
-    html = base('规则 vs 中证红利全收益', '同一本金、同一区间');
+    html = base('这只股票 vs 中证红利全收益', `同本金、同${perYearAdd > 0 ? '定投节奏' : '区间'}`);
     drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [
-      { name: '规则净值', rows: navW(r.nav), color: '#d8a84e' },
-      { name: '中证红利全收益', rows: benchW, color: '#8b93a1', opacity: 0.9 },
+      { name: nameOf(r.code), rows: navW(r.nav), color: '#d8a84e' },
+      { name: '中证红利全收益', rows: (r.bench?.rows || []).map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: '#8b93a1', opacity: 0.9 },
     ], { yFmt: (v) => v.toFixed(0) });
   }
   box.innerHTML = html;
