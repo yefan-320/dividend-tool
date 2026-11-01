@@ -120,8 +120,8 @@ export async function loadMonthly() {
     const j = await getJson('monthly.json');
     db.monthly = j.months || {};
   } catch (e) {
-    // 月线 6.5MB 不预缓存（手机流量友好）：离线首次进回测页给明确提示，而不是 503 报错
-    throw new Error('月线数据没加载成功：回测需要 6.5MB 月线，该文件不预缓存。请联网打开一次回测页（之后即可离线使用）。原始错误：' + e.message);
+    // 月线 6.5MB 不预缓存、也不进首屏：只有「对比模式的红利策略选股」和「起点早于 2014-06」才会用到它
+    throw new Error('月线数据没加载成功：只有对比模式的全市场选股、或把回测起点拖到 2014-06 之前才需要这 6.5MB 月线。请联网后重试；只想看自己的组合用日 K 即可，不需要月线。原始错误：' + e.message);
   }
   return db.monthly;
 }

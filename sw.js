@@ -5,7 +5,7 @@
    首屏和离线外壳都不需要它，放进 SHELL 会让「装好、离线可用」多等约 40% 的下载。
    改由页面空闲时发 warm-charts 消息补缓存（见 WARM / warmAll），
    没补上也不影响在线画图——外壳的 fetch 处理器会把首次取到的文件顺手缓存。 */
-const VERSION = 'hongli-v1.0.0';
+const VERSION = 'hongli-v1.0.1';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './styles/tokens.css', './styles/base.css', './styles/components.css', './styles/pages.css',

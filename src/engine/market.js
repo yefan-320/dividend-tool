@@ -74,9 +74,9 @@ export function buildTradingDates({ indexRows = [], dailyCal = [], monthly = {},
   const set = new Set();
   for (const [d] of indexRows) if (d >= from && d <= to) set.add(d);
   for (const d of dailyCal) if (d >= from && d <= to) set.add(d);
-  // 月线兜底（没有日线时）
+  // 月线兜底（没有日线时）；月线按需加载，没拉时是 null
   if (!set.size) {
-    for (const rows of Object.values(monthly)) {
+    for (const rows of Object.values(monthly || {})) {
       for (const [ym] of rows) {
         const d = monthEnd(ym);
         if (d >= from && d <= to) set.add(d);

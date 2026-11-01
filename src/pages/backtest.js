@@ -115,16 +115,35 @@ function structure() {
   };
 }
 
-async function loadMarket(codes, from, to, { finance = false, monthly = 'auto' } = {}) {
+/** 日 K 序列 → [[ym, 月末收盘], ...]（没拉月线时，给股息率分位/相似状态模块兜底；日 K 比月线更细） */
+function monthlyFromSeries(series) {
+  if (!series || !series.dates || !series.dates.length) return [];
+  const out = [];
+  const { dates, closes } = series;
+  for (let i = 0; i < dates.length; i++) {
+    const ym = dates[i].slice(0, 7);
+    const nextYm = i + 1 < dates.length ? dates[i + 1].slice(0, 7) : '';
+    if (nextYm !== ym) out.push([ym, closes[i]]);
+  }
+  return out;
+}
+
+async function loadMarket(codes, from, to, { finance = false, monthly = 'auto', marketWide = false } = {}) {
   const dailyMeta = await loadDailyMeta();
-  const useMonthly = monthly === 'auto' ? from < dailyMeta.cal[0] : !!monthly;
-  const [months, index] = await Promise.all([useMonthly ? loadMonthly() : Promise.resolve(null), loadIndexDaily()]);
+  // 日 K 日历覆盖到 2014-06 起。起点落在日 K 范围内、又不需要全市场选股时，一个月的月线都不拉：
+  //  · 起点早于 2014-06（要月线补早期价格）
+  //  · 对比模式的「红利策略 20 只」（要从 2800 只里选，必须有全市场月线）
+  // 只有这两种情况才下 6.2MB。monthly===false 可强制不拉。
+  const useMonthly = monthly !== false && (from < dailyMeta.cal[0] || marketWide);
+  const [monthsFull, index] = await Promise.all([useMonthly ? loadMonthly() : Promise.resolve(null), loadIndexDaily()]);
   const finHistory = finance ? await loadFinanceHistory() : null;
   const daily = await loadDailyMany(codes);
   const series = new Map();
-  for (const c of codes) series.set(c, buildSeries({ cal: dailyMeta.cal, daily: daily.get(c), monthly: months ? months[c] : null }));
-  const dates = buildTradingDates({ indexRows: index.h00922.rows, dailyCal: dailyMeta.cal, monthly: months, from, to });
-  return { months, finHistory, index, dailyMeta, daily, series, dates };
+  for (const c of codes) series.set(c, buildSeries({ cal: dailyMeta.cal, daily: daily.get(c), monthly: monthsFull ? monthsFull[c] : null }));
+  // 没拉月线时用日 K 月末收盘顶替「月线」，只服务股息率分位/相似状态（拿到的其实是更细的日 K）
+  const months = monthsFull || Object.fromEntries(codes.map((c) => [c, monthlyFromSeries(series.get(c))]));
+  const dates = buildTradingDates({ indexRows: index.h00922.rows, dailyCal: dailyMeta.cal, monthly: monthsFull, from, to });
+  return { months, marketMonths: monthsFull, finHistory, index, dailyMeta, daily, series, dates };
 }
 
 function benchRows(index, benchmarkMonthly, from, to) {
@@ -776,7 +795,8 @@ export async function renderBacktest() {
   const needFinance = btState.mode !== 'port';
   const market = await loadMarket(codes, clampFrom(btState.from), btState.to, {
     finance: needFinance,
-    monthly: btState.mode === 'stock' ? 'auto' : true,
+    monthly: 'auto',
+    marketWide: btState.mode === 'cmp',
   });
   const bench = benchRows(market.index, db.benchmark, clampFrom(btState.from), btState.to);
   const lv = lowVolRows(market.index, clampFrom(btState.from), btState.to);
@@ -820,7 +840,7 @@ export async function renderBacktest() {
     });
     const plan = runPlanBacktest({
       baseline: db.baseline,
-      months: market.months,
+      months: market.marketMonths || market.months,
       benchmark: db.benchmark,
       finHistory: market.finHistory,
       params: {
