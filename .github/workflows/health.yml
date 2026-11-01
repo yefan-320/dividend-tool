@@ -23,3 +23,18 @@ jobs:
           echo "$sw" | grep -q "VERSION = 'd3-" || { echo 'sw VERSION 标识缺失'; exit 1; }
           echo "$sw" | grep -q "finance-core.json" || { echo 'sw 预缓存缺 finance-core'; exit 1; }
           echo 'health OK'
+      - name: 数据新鲜度（行情快照 ≤30 天）
+        run: |
+          set -e
+          curl -s --max-time 20 "https://yefan-320.github.io/dividend-tool/data/quotes.json" -o /tmp/quotes.json
+          python3 - <<'PY'
+          import json, datetime, sys
+          d = json.load(open('/tmp/quotes.json'))
+          g = d.get('generated')
+          if not g:
+              print('缺 generated'); sys.exit(1)
+          age = (datetime.date.today() - datetime.date.fromisoformat(g)).days
+          print('行情快照', g, '距今', age, '天')
+          if age > 30:
+              print('数据超过 30 天未更新：双击 红利/更新数据.command'); sys.exit(1)
+          PY

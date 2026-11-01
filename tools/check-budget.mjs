@@ -25,7 +25,7 @@ const BUDGET = {
   coreDataKB: 420,
   shellKB: 140,
   firstLoadKB: 560,
-  precacheKB: 1100, // SW 安装时后台预缓存总量（含离线用的 ECharts / 日 K 兜底），不阻塞首屏
+  precacheKB: 950, // SW 安装时后台预缓存总量（含离线用的 ECharts），不阻塞首屏；演示日 K 已改为按需缓存
 };
 
 /* 1. 首屏核心数据 */

@@ -20,6 +20,7 @@
     "xss": "node tools/check-xss.mjs",
     "render-budget": "node tools/check-render-budget.mjs",
     "pwa": "node tools/check-pwa.mjs",
-    "plan-flow": "node tools/check-plan-flow.mjs"
+    "plan-flow": "node tools/check-plan-flow.mjs",
+    "offline": "node tools/check-offline.mjs"
   }
 }

@@ -179,6 +179,35 @@ try {
   check('dip 显示「股息率门槛」节奏', !!dipHero && dipHero.v.includes('股息率'), dipHero?.v);
   const dipBuy = heroOf(d3.hero, '本轮买入');
   check('dip 未触发时本轮买入为 0', !!dipBuy && /0(\.0)? 万/.test(dipBuy.v), dipBuy?.v);
+
+  /* ---------- 5) 卖出场景：持仓超过目标权重 → 建议卖出（卖出回收计入现金缺口） ---------- */
+  const sellTxs = [{ id: 't-sell', date: '2025-01-02', code: '600036', side: 'buy', shares: 20000, price: 30, fee: 5 }];
+  const sellPositions = new Map([['600036', 20000]]);
+  const sellAct = planActionRows({ plan: oncePlan, positions: sellPositions, quotes: quotesData, dividends: dividendsData, buyCap: null });
+  const sellRow = sellAct.rows.find((r) => r.code === '600036');
+  const buyRow = sellAct.rows.find((r) => r.code === '601398');
+  const needCashSell = sellAct.rows.filter((r) => r.sugSide === 'buy' && r.sugShares > 0).reduce((s, r) => s + r.sugShares * r.price, 0);
+  const sellCash = sellAct.rows.filter((r) => r.sugSide === 'sell' && r.sugShares > 0).reduce((s, r) => s + r.sugShares * r.price, 0);
+  const shortfallSell = Math.max(0, needCashSell - (cashLow + sellCash));
+  await seed({ plans: [oncePlan], txs: sellTxs, cash: cashLow });
+  await openDetail();
+  const d4 = await readDetail();
+  const sellCellRow = d4.rows.find((r) => (r.cells[0] || '').includes('600036'));
+  const sellCell = sellCellRow ? sellCellRow.cells[7] : '';
+  check('持仓超配时建议卖出且股数与引擎一致',
+    !!sellRow && sellRow.sugSide === 'sell' && sellCell.includes('卖') && sellCell.includes(String(sellRow.sugShares)),
+    `engine=${sellRow?.sugSide} ${sellRow?.sugShares} UI="${sellCell}"`);
+  const buy4 = buyRow ? d4.buys.find((b) => b.code === buyRow.code) : null;
+  check('卖出场景下低配股票仍给出买入建议', !!buyRow && !!buy4 && buy4.shares === buyRow.sugShares, `engine=${buyRow?.sugShares} UI=${buy4?.shares}`);
+  const heroBuy4 = heroOf(d4.hero, '本轮买入');
+  check('卖出场景本轮买入金额与引擎一致', !!heroBuy4 && heroBuy4.v.startsWith((needCashSell / 1e4).toFixed(1)), `UI=${heroBuy4?.v} 期望≈${(needCashSell / 1e4).toFixed(1)} 万`);
+  check('卖出回收金额显示在本轮买入副标题', !!heroBuy4 && heroBuy4.s.includes((sellCash / 1e4).toFixed(1)), `s="${heroBuy4?.s}" 期望卖≈${(sellCash / 1e4).toFixed(1)} 万`);
+  const warn4 = d4.warn.find((t) => t.includes('差 '));
+  if (shortfallSell > 0.5) {
+    check('卖出后现金仍不足时缺口提示正确', !!warn4 && warn4.includes((shortfallSell / 1e4).toFixed(1) + ' 万'), `UI=${warn4 || '无'}`);
+  } else {
+    check('卖出回收足够时不再提示缺口', !warn4, warn4 || '无');
+  }
 } finally {
   try {
     await evalJs(`(() => {

@@ -97,6 +97,7 @@ node tools/fetch-finance.mjs 2011 2025
 node tools/fetch-daily.mjs --offline-cache   # 可选：想把全市场日 K 落盘当离线缓存时再跑（默认不跑，页面按需联网）
 node tools/build-derivatives.mjs      # 生成 dy-pct.json（分位预计算）
 node tools/build-slim-data.mjs       # 生成 finance-core/extra、瘦身 baseline（fetch-finance 会自动跑）
+# 或直接双击 红利/更新数据.command：抓行情+月线→重建派生→体检→单测→有变化自动推送
 node tools/audit-app.mjs              # 数据 + 引擎体检 → ../report/AUDIT-APP.md
 ```
 
@@ -130,7 +131,8 @@ node tools/check-budget.mjs    # 首屏性能预算：核心数据/JS gzip 体�
 node tools/check-xss.mjs       # XSS/转义审计（需 8766 + Chrome 9222；CI 里跟冒烟一起跑）
 node tools/check-render-budget.mjs  # 渲染耗时门禁（CPU 4x，冷/热渲染预算；CI 里跟冒烟一起跑）
 node tools/check-pwa.mjs       # PWA 可安装性（SW 控制、installability、manifest/图标）
-node tools/check-plan-flow.mjs # 执行清单端到端：引擎期望 vs 页面渲染（含现金缺口/记一笔落账/dip 未触发）
+node tools/check-plan-flow.mjs # 执行清单端到端：引擎期望 vs 页面渲染（含现金缺口/记一笔落账/dip 未触发/卖出场景）
+node tools/check-offline.mjs   # 离线可用性：页面 + SW 双断网，今天/选股/个股可打开
 node tools/perf.mjs            # 冷/热加载性能（含 ECharts 按需加载核验）
 node tools/perf-boot.mjs       # 首屏启动：本地 vs 慢 4G + 4x CPU（骨架出现时间 / 完整首屏）
 node tools/perf-render.mjs     # 各页面 render() 耗时（CPU 4x，比较优化前后）
@@ -138,7 +140,7 @@ node tools/shot.js             # 界面截图 → ../report/design/
 ```
 
 `npm run verify` = 单测 + 静态检查 + 性能预算 + 数据体检（不需要浏览器）；`npm run smoke` / `npm run perf` 需要本地 8766 + Chrome 9222。
-每次 `git push main` 后 GitHub Actions 会自动跑：177 单测 + 静态检查 + 数据体检 + 首屏性能预算 + 浏览器冒烟 36 项 + 渲染耗时门禁 + XSS 审计 + PWA 可安装性 + 执行清单端到端（`.github/workflows/test.yml`，CI 里自起静态服务与无头 Chrome）；另有每日线上健康检查（`.github/workflows/health.yml`）。失败会在仓库 Actions 页提示。
+每次 `git push main` 后 GitHub Actions 会自动跑：177 单测 + 静态检查 + 数据体检 + 首屏性能预算 + 浏览器冒烟 36 项 + 渲染耗时门禁 + XSS 审计 + PWA 可安装性 + 执行清单端到端 + 离线可用性（`.github/workflows/test.yml`，CI 里自起静态服务与无头 Chrome）；另有每日线上健康检查（`.github/workflows/health.yml`）。失败会在仓库 Actions 页提示。
 
 当前结果：
 
