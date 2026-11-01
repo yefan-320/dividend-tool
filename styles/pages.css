@@ -68,17 +68,22 @@
 
 /* ============ 个股 ============ */
 .stock-search-wrap { position: relative; z-index: 30; margin-bottom: 14px; }
-/* 回测页的「换一只」：搜索框独占一行，右边显示当前是哪只 */
-.stock-pick-row {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  margin: 0 0 14px;
+/* 回测页的「换一只」：照 iOS 搜索栏做——整行一条填充底、无边框、放大镜在左 */
+.stock-picker { margin: 0 0 16px; max-width: 560px; }
+.stock-picker .stock-search {
+  height: 38px; padding: 0 11px; gap: 8px;
+  border: 0; border-radius: 10px; background: var(--surface-2);
+  transition: background .15s;
 }
-.stock-pick-row .stock-search-wrap { flex: 1 1 320px; max-width: 520px; margin: 0; }
-.stock-pick-now {
-  font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap;
-  padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+.stock-picker .stock-search:focus-within { background: var(--surface-3); }
+.stock-picker .stock-search svg { width: 15px; height: 15px; color: var(--text-3); }
+.stock-picker .stock-search input { font-size: 13.5px; }
+/* 候选板要比搜索框高一档，不然两层灰糊在一起 */
+.stock-picker .search-suggest {
+  background: var(--surface-3); border-color: rgba(255,255,255,.07);
+  box-shadow: 0 16px 40px rgba(0,0,0,.55);
 }
-.stock-pick-now .mono { font-weight: 500; font-size: 10.5px; color: var(--text-3); margin-left: 4px; }
+.stock-picker .search-suggest .sg-item.on { background: rgba(216, 168, 78, .14); }
 .stock-search {
   display: flex;
   align-items: center;

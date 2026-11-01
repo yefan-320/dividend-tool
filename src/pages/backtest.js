@@ -699,21 +699,18 @@ function renderStockPage(market, structureData) {
   const perYearAdd = btState.monthlyAdd * 12;
   return `
   ${paramBar({ tabs: false, stock: true })}
-  <div class="stock-pick-row">
-    <div class="stock-search-wrap">
-      <div class="stock-search">${icon('search')}<input id="stSearch" placeholder="换一只：600036 / 招商银行 / 招行" autocomplete="off" spellcheck="false"><kbd>Enter</kbd></div>
-      <div id="stSuggest" class="search-suggest" hidden></div>
-    </div>
-    <div class="stock-pick-now">${esc(nameOf(code))} <span class="mono">${esc(code)}</span></div>
+  <div class="stock-search-wrap stock-picker">
+    <div class="stock-search">${icon('search')}<input id="stSearch" placeholder="搜索代码或名称" autocomplete="off" spellcheck="false"></div>
+    <div id="stSuggest" class="search-suggest" hidden></div>
   </div>
   ${hero({
     kicker: `个股定投 · ${esc(nameOf(code))} ${esc(code)} · ${clampFrom(btState.from)} → ${btState.to}`,
     main: `${bigMoney(r.totalIn)} <span class="thin">→</span> <b class="num gold">${bigMoney(r.end)}</b><span class="thin">，年化 ${pctSign(st.cagr == null ? null : st.cagr * 100, 1)}</span>`,
-    desc: `不判断买卖点：第一天全买，${perYearAdd > 0 ? `每月追 ${bigMoney(perYearAdd / 12)}，` : '不再追加，'}分红当天再投 · 累计卖出 0 次`,
+    desc: `不判断买卖点：第一天全买，${perYearAdd > 0 ? `每月追 ${bigMoney(perYearAdd / 12)}，` : '不再追加，'}分红当天再投 · 累计卖出 0 次 · vs 中证红利全收益 ${pctSign(st.excess == null ? null : st.excess * 100, 1)}/年`,
     stats: [
-      { k: '累计投入', v: bigMoney(r.totalIn), s: perYearAdd > 0 ? `${num(st.years, 1)} 年 · 含定投 ${bigMoney(r.totalIn - btState.capital)}` : `${num(st.years, 1)} 年 · 一次性` },
-      { k: '期末', v: bigMoney(r.end), cls: vc, s: `${num(r.shares, 0)} 股 + 零钱 ${bigMoney(r.cash)}` },
+      { k: '累计收益', v: pctSign(st.ret == null ? null : st.ret * 100, 1), cls: vc, s: `${num(st.years, 1)} 年 · 本金口径` },
       { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: perYearAdd > 0 ? 'XIRR 资金加权' : '复利折算' },
+      { k: '最大回撤', v: pct(st.mdd * 100, 1), cls: 'down', s: `${esc(st.mddPeak)} → ${esc(st.mddTrough)}` },
       { k: '分红', v: bigMoney(r.totalDiv), cls: 'gold', s: `全部再投，滚了 ${st.reinvest} 次` },
     ],
   })}
@@ -729,6 +726,7 @@ function renderStockPage(market, structureData) {
     { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: perYearAdd > 0 ? 'XIRR 资金加权' : '复利折算', key: 'ann' },
     { k: '最大回撤', v: pct(st.mdd * 100, 1), cls: 'down', s: `${esc(st.mddPeak)} → ${esc(st.mddTrough)}`, key: 'dd' },
     { k: '分红', v: bigMoney(r.totalDiv), cls: 'gold', s: `再投 ${st.reinvest} 次，一分没取`, key: 'div' },
+    { k: '买入持有', v: bigMoney(r.endHold), s: `年化 ${pctSign(st.cagrHold == null ? null : st.cagrHold * 100, 1)} · 分红不复投`, key: 'hold' },
     { k: 'vs 指数', v: pctSign(st.excess == null ? null : st.excess * 100, 1), cls: upDown(st.excess), s: 'vs 中证红利全收益', key: 'bench' },
   ])}
   <div id="metricDetail" style="margin-top:12px"></div>
@@ -1253,6 +1251,12 @@ function renderStockMetric(key) {
   } else if (key === 'div') {
     html = base('年度分红', '每年 4 月末到账，当天再买回');
     drawFn = () => drawDivChart(document.getElementById('msChart'), r.divByY);
+  } else if (key === 'hold') {
+    html = base('分红再投 vs 不复投', '同本金、同区间；不复投那份分红进现金');
+    drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [
+      { name: '分红再投', rows: navW(r.nav), color: '#d8a84e' },
+      { name: '分红不复投', rows: navW(r.navHold || []), color: '#5b9cf5', opacity: 0.85 },
+    ], { yFmt: (v) => v.toFixed(0) });
   } else if (key === 'bench') {
     html = base('这只股票 vs 中证红利全收益', `同本金、同${perYearAdd > 0 ? '定投节奏' : '区间'}`);
     drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [

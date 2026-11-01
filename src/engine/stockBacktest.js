@@ -228,6 +228,7 @@ export function runInvestBacktest(o) {
 
   const px = (d) => priceAt(series, d) || 0;
   const nav = [];
+  const hold = [];
   const trades = [];
   const divByY = {};
   const yearly = [];
@@ -236,6 +237,9 @@ export function runInvestBacktest(o) {
   let cash = 0;          // 凑不满 100 股的零钱
   let totalIn = 0;
   let totalDiv = 0;
+  // 对照：同一笔本金第一天买入、永远不动、分红进现金不再投（buy & hold 的通常口径）
+  let holdShares = 0;
+  let holdCash = 0;
   let yearNav0 = 0;
   let yearDiv = 0;
   let yearIn = 0;
@@ -248,6 +252,8 @@ export function runInvestBacktest(o) {
     const n0 = p0 > 0 ? Math.floor(capital / p0 / 100) * 100 : 0;
     shares = n0;
     cash = capital - n0 * p0;
+    holdShares = n0;
+    holdCash = cash;
     totalIn = capital;
     flows.push([d0, -capital]);
     trades.push({ date: d0, type: '建仓', shares: n0, price: p0, amount: capital, why: '首次本金全买' });
@@ -294,6 +300,7 @@ export function runInvestBacktest(o) {
         divByY[y] = (divByY[y] || 0) + amt;
         yearDiv += amt;
         cash += amt;
+        holdCash += holdShares * dps;   // 对照口径：分红进现金，不投
         const p = px(date);
         const n = p > 0 ? Math.floor(cash / p / 100) * 100 : 0;
         if (n > 0) {
@@ -307,6 +314,7 @@ export function runInvestBacktest(o) {
     }
 
     nav.push([date, shares * px(date) + cash]);
+    hold.push([date, holdShares * px(date) + holdCash]);
   }
 
   if (lastYear != null) {
@@ -314,6 +322,8 @@ export function runInvestBacktest(o) {
   }
 
   const end = nav.length ? nav[nav.length - 1][1] : capital;
+  const endHold = hold.length ? hold[hold.length - 1][1] : capital;
+  const cagrHold = capital > 0 ? annualize(endHold / capital - 1, from, to) : null;
   // 一次性投入时没有现金流，XIRR 无定义，退回复利折算
   const cagr = flows.length > 1
     ? xirr(flows.concat([[nav[nav.length - 1][0], end]]))
@@ -325,11 +335,14 @@ export function runInvestBacktest(o) {
     : null;
 
   return {
-    code, from, to, dates, nav, trades, divByY, yearly,
-    totalDiv, totalIn, end, shares, cash, lastPrice: dates.length ? px(dates[dates.length - 1]) : 0,
+    code, from, to, dates, nav, navHold: hold, trades, divByY, yearly,
+    totalDiv, totalIn, end, endHold, shares, cash, lastPrice: dates.length ? px(dates[dates.length - 1]) : 0,
     stats: {
+      ret: capital > 0 ? end / capital - 1 : null,
+      retHold: capital > 0 ? endHold / capital - 1 : null,
       retFund,
       cagr,
+      cagrHold,
       mdd: ddStat.mdd,
       mddPeak: ddStat.mddPeak,
       mddTrough: ddStat.mddTrough,
