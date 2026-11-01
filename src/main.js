@@ -8,6 +8,7 @@ import { applyTableLayout, refreshTableHints } from './ui/table.js';
 import { loadCore, db, applyQuoteCache, refreshQuotes } from './data.js';
 import { loadSettings } from './store.js';
 import { toast } from './ui/toast.js';
+import { ensureEcharts } from './charts.js';
 import { closeModal } from './ui/modal.js';
 
 const PAGES = [
@@ -204,6 +205,8 @@ async function boot() {
   renderSidebar(bootId);
   renderTabbar(bootId);
   app.innerHTML = skeleton();
+  // 图表库 338KB，和数据并行下；不 await，谁先到都不耽误
+  ensureEcharts().catch(() => {});
   try {
     await loadCore();
     performance.mark?.('d3-core-done');
