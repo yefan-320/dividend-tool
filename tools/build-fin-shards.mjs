@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 /**
- * 把 data/finance-history.json（5513 只、4.3MB）按股票代码前 4 位切成小片。
+ * 把 data/finance-history.json（5513 只、4.3MB 整包）拆成「一只股票一个文件」。
  *
- * 为什么：个股回测只需要一只股票的历年财报，却要下 4.3MB（gzip 1.9MB）。
- * 切片后 601398 只拉 data/fin/6013.json（16KB，gzip 约 5KB）。
+ * 为什么：回测哪几只，就只该下那几只的财报。
+ *   · 个股回测 601398      → 只拉 data/fin/601398.json（约 0.5KB）
+ *   · 组合 8 只            → 只拉这 8 个文件（约 4KB）
+ *   · 对比模式全市场选股   → 才拉整包 finance-history.json（4.3MB）
+ * 按代码前缀切「片」是不彻底的：片里 55 只，你只要 1 只也得把另外 54 只下下来。
  *
  * 产出：
- *   data/fin/<前4位>.json   { "<code>": [[year,eps,roe,nm,liab,ocfps], ...] }
- *   data/fin/index.json     { generated, count, shards: ["0000", ...] }
+ *   data/fin/<code>.json   每只：[[year,eps,roe,nm,liab,ocfps], ...]
  *
  * 用法：node tools/build-fin-shards.mjs
  */
@@ -20,33 +22,32 @@ const OUT = path.join(ROOT, 'data', 'fin');
 
 const raw = JSON.parse(fs.readFileSync(SRC, 'utf8'));
 const data = raw.data || {};
+
+// 清空旧产物（旧的按前缀分片也要清掉）
+fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
 
-const shards = {};
+let n = 0;
+let total = 0;
+let maxBytes = 0;
+let maxCode = '';
+const codes = [];
 for (const [code, rows] of Object.entries(data)) {
   if (!/^\d{6}$/.test(code)) continue;
-  const key = code.slice(0, 4);
-  (shards[key] ||= {})[code] = rows;
-}
-
-// 清掉旧片，避免改名后留垃圾
-for (const f of fs.readdirSync(OUT)) {
-  if (/^\d{4}\.json$/.test(f)) fs.unlinkSync(path.join(OUT, f));
-}
-
-let total = 0;
-for (const [key, obj] of Object.entries(shards)) {
-  const json = JSON.stringify(obj);
-  fs.writeFileSync(path.join(OUT, key + '.json'), json);
+  const json = JSON.stringify(rows);
+  const file = path.join(OUT, code + '.json');
+  fs.writeFileSync(file, json);
+  codes.push(code);
+  n++;
   total += json.length;
+  if (json.length > maxBytes) { maxBytes = json.length; maxCode = code; }
 }
 
-const keys = Object.keys(shards).sort();
+// index.json 只用于「离线缓存全部」按钮；回测本身不需要它
 fs.writeFileSync(path.join(OUT, 'index.json'), JSON.stringify({
   generated: raw.generated || new Date().toISOString().slice(0, 10),
-  count: Object.keys(data).length,
-  shards: keys,
+  count: n,
 }));
 
-console.log(`✓ ${keys.length} 片 · ${Object.keys(data).length} 只 · ${(total / 1024).toFixed(0)}KB`);
-console.log(`  最大片 ${keys.map((k) => [k, fs.statSync(path.join(OUT, k + '.json')).size]).sort((a, b) => b[1] - a[1])[0].map((v) => (typeof v === 'number' ? (v / 1024).toFixed(0) + 'KB' : v)).join(' ')}`);
+console.log(`✓ ${n} 只，一只一个文件 · 合计 ${(total / 1024).toFixed(0)}KB · 平均 ${(total / n).toFixed(0)}B/只`);
+console.log(`  最大 ${maxCode}.json ${maxBytes}B`);

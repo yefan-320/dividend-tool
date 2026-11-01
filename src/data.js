@@ -104,40 +104,43 @@ export async function loadFinanceExtra() {
   return financeExtraPromise;
 }
 
-/* ---------------- 历年财报：按代码前 4 位分片按需拉 ---------------- */
+/* ---------------- 历年财报：一只一个文件，要哪只拉哪只 ---------------- */
 
-/** 已经装进 db.finHistory 的分片（前 4 位）。按需拉过的片不再重复下。 */
-const finShards = new Set();
-let finIndexPromise = null;
+/** 已经装进 db.finHistory 的股票代码，不重复下。 */
+const finDone = new Set();
+let finAllPromise = null;
 
 /**
  * 历年财报 {code: [[year,eps,roe,nm,liab,ocfps],...]}。
  *
- * 传 codes → 只拉这些股票所在的分片（个股回测只拉 1 片 ≈ 5KB，不再是整包 1.9MB）；
- * 不传     → 拉全部 93 片（对比模式的全市场选股才需要）。
- * 任何一片失败都不抛错：返回已经拿到的部分，把 db.finDegraded 置 true，由页面提示降级。
+ * 传 codes → **只拉这几只**：data/fin/<code>.json，一只约 0.5KB（gzip 471B）。
+ *            个股回测 601398 就只下 601398 这一个文件；组合 8 只就下 8 个。
+ * 不传     → 才下整包 finance-history.json（4.3MB）。只有对比模式的「红利策略 20 只」
+ *            要从全市场 2800 只里筛，非它不可。
+ * 任何一只失败都不抛错：返回已拿到的部分，db.finDegraded 置 true，由页面提示降级。
  */
 export async function loadFinanceHistory(codes = null) {
   db.finHistory = db.finHistory || {};
-  let keys;
-  if (codes && codes.length) {
-    keys = [...new Set(codes.map((c) => String(c).slice(0, 4)))].filter((k) => /^\d{4}$/.test(k));
-  } else {
-    if (!finIndexPromise) finIndexPromise = getJson('fin/index.json', { timeout: 15000 }).catch(() => null);
-    const idx = await finIndexPromise;
-    keys = idx && Array.isArray(idx.shards) ? idx.shards.slice() : null;
-    if (!keys) { db.finDegraded = true; return db.finHistory; }
-  }
-  const todo = keys.filter((k) => !finShards.has(k));
-  if (!todo.length) return db.finHistory;
 
-  // 分片很小，但一次开 93 条也过火：按 6 条一批并发
-  for (let i = 0; i < todo.length; i += 6) {
-    await Promise.all(todo.slice(i, i + 6).map(async (k) => {
+  if (!codes || !codes.length) {
+    if (!finAllPromise) {
+      finAllPromise = getJson('finance-history.json', { timeout: 45000 })
+        .then((j) => j.data || {})
+        .catch(() => null);
+    }
+    const all = await finAllPromise;
+    if (all) Object.assign(db.finHistory, all);
+    else db.finDegraded = true;
+    return db.finHistory;
+  }
+
+  const todo = [...new Set(codes.map(String))].filter((c) => /^\d{6}$/.test(c) && !finDone.has(c));
+  for (let i = 0; i < todo.length; i += 8) {
+    await Promise.all(todo.slice(i, i + 8).map(async (c) => {
       try {
-        const part = await getJson(`fin/${k}.json`, { timeout: 15000 });
-        Object.assign(db.finHistory, part);
-        finShards.add(k);
+        const rows = await getJson(`fin/${c}.json`, { timeout: 12000 });
+        if (Array.isArray(rows)) db.finHistory[c] = rows;
+        finDone.add(c);
       } catch (e) {
         db.finDegraded = true;
       }
@@ -146,9 +149,9 @@ export async function loadFinanceHistory(codes = null) {
   return db.finHistory;
 }
 
-/** 财报是否拉全过（对比模式的全市场选股需要） */
+/** 财报是否整包拿过（对比模式的全市场选股需要） */
 export function financeHistoryComplete() {
-  return !db.finDegraded && finShards.size > 0;
+  return !db.finDegraded && finDone.size > 0;
 }
 
 /** 最近年报财务：{eps, roe, nm, liab, ocfps, np, year}，没有返回 null */

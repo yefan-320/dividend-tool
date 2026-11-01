@@ -168,7 +168,7 @@ function settingsView() {
         <div class="settings-in"><input class="input" id="setCash" type="number" step="10000" min="0" max="1000000000000" value="${Math.round(cash)}"><em>元</em></div>
       </div>
       <div class="settings-row">
-        <div><div class="settings-k">离线回测数据</div><div class="settings-s">回测需要月线 ~6.4MB + 财报分片（按需，单片约 50KB）+ 指数日线；缓存后可离线回测</div></div>
+        <div><div class="settings-k">离线回测数据</div><div class="settings-s">月线 ~6.4MB + 指数日线；财报改成一只一个文件（约 0.5KB），回测哪只就下哪只，断网前打开过一次即可复用</div></div>
         <div class="settings-in"><span class="section-note" id="cacheStatus">检查中…</span><button class="btn ghost" id="prefetchCacheBtn">${icon('download')} 缓存回测数据</button></div>
       </div>
       <div class="settings-row">
@@ -395,14 +395,7 @@ export function bindMine() {
   const cacheStatus = document.getElementById('cacheStatus');
   const OFFLINE_FILES = ['data/monthly.json', 'data/index-daily.json'];
   const offlineUrls = () => OFFLINE_FILES.map((f) => new URL('../../' + f, import.meta.url).href);
-  /** 财报按代码前 4 位分片：离线前要把 93 片全拿下来（按需回测时只拉自己那几片） */
-  const finShardUrls = async () => {
-    try {
-      const res = await fetch(new URL('../../data/fin/index.json', import.meta.url).href, { cache: 'no-cache' });
-      const j = await res.json();
-      return (j.shards || []).map((k) => new URL(`../../data/fin/${k}.json`, import.meta.url).href);
-    } catch (e) { return []; }
-  };
+
   const refreshCacheStatus = async () => {
     if (!cacheStatus) return;
     if (!('caches' in window)) { cacheStatus.textContent = '不支持离线缓存'; return; }
@@ -418,7 +411,7 @@ export function bindMine() {
     prefetchBtn.onclick = async () => {
       if (!navigator.serviceWorker?.controller) { toast('请先刷新页面一次（离线缓存需要 Service Worker 生效）'); return; }
       prefetchBtn.disabled = true;
-      const urls = [...offlineUrls(), ...(await finShardUrls())];
+      const urls = offlineUrls();
       let done = 0;
       for (const [i, u] of urls.entries()) {
         if (cacheStatus) cacheStatus.textContent = `缓存中… ${i}/${urls.length}`;
