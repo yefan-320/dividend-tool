@@ -198,7 +198,7 @@ function settingsView() {
   <section class="panel fade-in" style="margin-top:14px">
     <div class="panel-head"><span class="panel-title">关于</span></div>
     <div class="panel-body settings-about">
-      <div>红利工具 · 本地离线版</div>
+      <div>红利工具 <b>v1.0.0</b> · 本地离线版</div>
       <div>数据源：新浪行情 / 腾讯日 K 月线 / 东财财报 / 中证指数全收益基准</div>
       <div>决策框架：质量闸门（亏损、支付率、现金流覆盖、股息率异常）→ 股息率门槛，不给预测、只给条件。</div>
       <div>回测口径：不复权价格 + 现金分红、4 月末到账、不含税与佣金；组合回测含未上市建仓规则。</div>

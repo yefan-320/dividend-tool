@@ -1,6 +1,6 @@
 /* 红利工具 Service Worker：应用外壳预缓存 + 数据 stale-while-revalidate。
-   代码更新时把 VERSION 加一即可让旧缓存失效。 */
-const VERSION = 'd3-v11';
+   代码更新时把 VERSION 加一（v1.0.0 → v1.0.1）即可让旧缓存失效。 */
+const VERSION = 'hongli-v1.0.0';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './styles/tokens.css', './styles/base.css', './styles/components.css', './styles/pages.css',
