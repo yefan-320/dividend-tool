@@ -15,7 +15,7 @@ import { runPlanBacktest } from '../engine/backtest.js';
 import { entryLabel } from '../engine/plan.js';
 import { loadTxs, loadCash, loadPlans, savePlan, loadSettings } from '../store.js';
 import {
-  drawPortfolioChart, drawCandleChart, drawNavChart, drawDonut, drawWaterfall,
+  drawPortfolioChart, drawPriceChart, drawNavChart, drawDonut, drawWaterfall,
   drawEnvChart, drawDivChart, drawSimilarChart, drawLineMini, drawBarsVs, drawMultiLineChart,
 } from '../charts.js';
 import { icon } from '../ui/icons.js';
@@ -673,7 +673,7 @@ function renderStockPage(market, structureData) {
   <div id="metricDetail" style="margin-top:12px"></div>
 
   <section class="panel fade-in" style="margin-top:14px">
-    <div class="panel-head"><span class="panel-title">日 K · 买卖点 / 分红</span><span class="section-note">蜡烛 + 成交量 · MA20/MA60 · 红▲买入 绿▼卖出 金◆分红</span></div>
+    <div class="panel-head"><span class="panel-title">日 K · 买卖点 / 分红</span><span class="section-note">收盘线 + MA20/MA60 · 红▲买入 绿▼卖出 金◆分红</span></div>
     <div class="panel-body" style="padding:8px 10px 4px"><div id="stChart" class="chart" style="height:380px"></div></div>
   </section>
 
@@ -1085,12 +1085,12 @@ function drawStockPageCharts() {
       const d = daily.cal[i];
       if (d < clampFrom(btState.from) || d > btState.to) continue;
       if (daily.c[i] == null) continue;
-      candleRows.push([d, daily.o[i], daily.h[i], daily.l[i], daily.c[i], daily.v[i] || 0]);
+      candleRows.push([d, daily.c[i]]);
     }
   } else {
     const s = ctx.market.series.get(btState.stock);
     for (const [d, c] of s.dates.map((d, i) => [d, s.closes[i]])) {
-      if (d >= clampFrom(btState.from)) candleRows.push([d, c, c, c, c, 0]);
+      if (d >= clampFrom(btState.from)) candleRows.push([d, c]);
     }
   }
   for (const [y, amt] of Object.entries(r.divByY)) {
@@ -1098,7 +1098,7 @@ function drawStockPageCharts() {
     const p = priceAt(ctx.market.series.get(btState.stock), `${y}-04-30`);
     if (p > 0) marks.push({ date: `${y}-04-30`, price: p, kind: 'div', why: `分红 ${(amt / 10000).toFixed(1)}万` });
   }
-  drawCandleChart(document.getElementById('stChart'), candleRows, { marks });
+  drawPriceChart(document.getElementById('stChart'), candleRows, { marks });
   drawNavChart(document.getElementById('stNav'), { nav: r.nav, bench: r.bench, dd: drawdownOf(r.nav), hold: r.navHold, capital: btState.capital });
 }
 
@@ -1110,11 +1110,11 @@ function drawStockManual(code) {
   if (daily && daily.cal) {
     for (let i = 0; i < daily.cal.length; i++) {
       if (daily.c[i] == null) continue;
-      rows.push([daily.cal[i], daily.o[i], daily.h[i], daily.l[i], daily.c[i], daily.v[i] || 0]);
+      rows.push([daily.cal[i], daily.c[i]]);
     }
   }
   const marks = r.events.filter((e) => e.type === '买入' && e.code === code).map((e) => ({ date: e.date, price: e.price, kind: 'buy', why: e.why }));
-  drawCandleChart(document.getElementById('sdChart-' + code), rows, { marks, ma: [20] });
+  drawPriceChart(document.getElementById('sdChart-' + code), rows, { marks, ma: [20] });
 }
 
 function renderStockMetric(key) {

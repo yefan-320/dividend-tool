@@ -1,5 +1,5 @@
 import { db, loadDaily, loadMonthly, loadDyPct, loadFinanceExtra, quote, nameOf, divSummary, dataMeta } from '../data.js';
-import { drawCandleChart } from '../charts.js';
+import { drawPriceChart } from '../charts.js';
 import { isWatched, toggleWatch } from '../store.js';
 import { openBuyModal } from '../ui/buy.js';
 import { toast } from '../ui/toast.js';
@@ -145,7 +145,7 @@ function chartPanel(code, days, source = '日 K') {
   return `<section class="panel fade-in" style="margin-top:14px">
     <div class="panel-head">
       <span class="panel-title">日 K</span>
-      <span class="section-note">${esc(source)} · 蜡烛 + 成交量 · MA20/MA60 · 不复权 · 至 ${esc(lastD)}</span>
+      <span class="section-note">${esc(source)} · 收盘线 · MA20/MA60 · 不复权 · 至 ${esc(lastD)}</span>
     </div>
     <div class="panel-body" style="padding:10px 10px 4px">
       <div class="stock-range">
@@ -177,7 +177,7 @@ export function bindStock() {
       const from = d.toISOString().slice(0, 10);
       list = rows.filter((r) => r[0] >= from);
     }
-    drawCandleChart(el, list, { lines: marks });
+    drawPriceChart(el, list, { lines: marks });
   };
   draw('3');
   document.querySelectorAll('[data-range]').forEach((b) => {
@@ -217,14 +217,14 @@ export async function renderStock() {
   const extraPromise = loadFinanceExtra().catch(() => {});
   const pctData = await loadDyPct().catch(() => ({}));
   const daily = await loadDaily(code);
-  let days = daily && daily.cal ? daily.cal.map((d, i) => (daily.c[i] == null ? null : [d, daily.o[i], daily.h[i], daily.l[i], daily.c[i], daily.v[i] || 0])).filter(Boolean) : [];
+  let days = daily && daily.cal ? daily.cal.map((d, i) => (daily.c[i] == null ? null : [d, daily.c[i]])).filter(Boolean) : [];
   let chartSource = days.length ? '日 K' : '';
   if (!days.length) {
     // 离线且没有本地日 K：用月线近似，保证图不白
     try {
       const months = await loadMonthly();
       const rows = months[code] || [];
-      days = rows.map(([ym, close]) => [ym + '-28', close, close, close, close, 0]);
+      days = rows.map(([ym, close]) => [ym + '-28', close]);
       chartSource = '月线（离线近似）';
     } catch (e) { chartSource = ''; }
   }

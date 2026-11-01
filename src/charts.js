@@ -40,28 +40,27 @@ function baseAxis(t) {
   };
 }
 
-/* ---------------- 日 K：蜡烛 + 成交量 + 均线 + 买卖/分红标注 ---------------- */
+/* ---------------- 价格走势：收盘线 + 均线 + 买卖/分红标注（不要蜡烛、不要成交量） ---------------- */
 
-function drawCandleChartImpl(el, rows, opts = {}) {
+function drawPriceChartImpl(el, rows, opts = {}) {
   if (!el || typeof echarts === 'undefined' || !rows || rows.length < 2) return null;
   const t = theme();
   const ch = chart(el);
   const dates = rows.map((r) => r[0]);
-  const kdata = rows.map((r) => [r[1], r[4], r[3], r[2]]); // 开、收、低、高
-  const vols = rows.map((r) => ({ value: r[5], itemStyle: { color: r[4] >= r[1] ? 'rgba(239,91,96,.55)' : 'rgba(53,181,122,.5)' } }));
+  const closes = rows.map((r) => r[1]);
   const ma = opts.ma || [20, 60];
   const maSeries = ma.map((n, idx) => ({
     name: 'MA' + n,
     type: 'line',
     showSymbol: false,
     smooth: false,
-    data: rows.map((r, i) => {
+    data: closes.map((_, i) => {
       if (i < n - 1) return null;
       let s = 0;
-      for (let j = i - n + 1; j <= i; j++) s += rows[j][4];
+      for (let j = i - n + 1; j <= i; j++) s += closes[j];
       return +(s / n).toFixed(2);
     }),
-    lineStyle: { width: 1, color: idx === 0 ? t.accent2 : t.info, opacity: 0.75 },
+    lineStyle: { width: 1, color: idx === 0 ? t.accent2 : t.info, opacity: 0.5 },
     z: 4,
   }));
   const marks = opts.marks || [];
@@ -69,51 +68,51 @@ function drawCandleChartImpl(el, rows, opts = {}) {
   const sellPts = marks.filter((m) => m.kind === 'sell').map((m) => ({ value: [m.date, m.price], name: m.why || '卖出' }));
   const divPts = marks.filter((m) => m.kind === 'div').map((m) => ({ value: [m.date, m.price], name: m.why || '分红' }));
   const lines = opts.lines || [];
+  const first = closes.find((v) => v > 0) || 0;
   ch.setOption({
     animation: false,
     backgroundColor: 'transparent',
-    grid: [
-      { left: 8, right: 52, top: 12, height: '62%', containLabel: true },
-      { left: 8, right: 52, top: '78%', height: '15%', containLabel: true },
-    ],
-    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    grid: { left: 8, right: 52, top: 12, bottom: 30, containLabel: true },
     tooltip: {
       ...baseTooltip(t),
       formatter: (ps) => {
         const i = ps[0]?.dataIndex;
         if (i == null) return '';
-        const r = rows[i];
-        const extra = marks.filter((m) => m.date === r[0]).map((m) => `<div style="font-size:10.5px;color:${m.kind === 'sell' ? t.down : t.accent2}">${m.why || m.kind}</div>`).join('');
-        return `<div style="font-family:var(--mono);font-size:10px;color:${t.text3};margin-bottom:4px">${r[0]}</div>` +
-          `<div style="font-size:11px;line-height:1.75">开 ${r[1]} · 收 <b>${r[4]}</b><br>高 ${r[2]} · 低 ${r[3]}<br>量 ${Math.round(r[5] / 10000)} 万手</div>` + extra;
+        const c = closes[i];
+        const pctv = first > 0 ? (c / first - 1) * 100 : null;
+        const extra = marks.filter((m) => m.date === dates[i]).map((m) => `<div style="font-size:10.5px;color:${m.kind === 'sell' ? t.down : t.accent2}">${m.why || m.kind}</div>`).join('');
+        return `<div style="font-family:var(--mono);font-size:10px;color:${t.text3};margin-bottom:4px">${dates[i]}</div>` +
+          `<div style="font-size:11px;line-height:1.75">收盘 <b>${c}</b>${pctv == null ? '' : `　区间 <b class="${pctv >= 0 ? 'up' : 'down'}">${pctv >= 0 ? '+' : ''}${pctv.toFixed(1)}%</b>`}</div>` + extra;
       },
     },
-    xAxis: [
-      { type: 'category', data: dates, boundaryGap: true, gridIndex: 0, ...baseAxis(t), axisLabel: { show: false } },
-      { type: 'category', data: dates, boundaryGap: true, gridIndex: 1, ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9, interval: Math.max(1, Math.floor(dates.length / 7)), formatter: (v) => String(v).slice(2).replace('-', '/') } },
-    ],
-    yAxis: [
-      { type: 'value', scale: true, position: 'right', gridIndex: 0, ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9.5, formatter: (v) => v.toFixed(v >= 100 ? 0 : 2) }, splitLine: { show: true, lineStyle: { color: t.line } } },
-      { type: 'value', scale: true, position: 'right', gridIndex: 1, ...baseAxis(t), axisLabel: { show: false }, splitLine: { show: false } },
-    ],
-    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 }],
+    xAxis: {
+      type: 'category', data: dates, boundaryGap: false, ...baseAxis(t),
+      axisLabel: { color: t.text3, fontSize: 9, interval: Math.max(1, Math.floor(dates.length / 7)), formatter: (v) => String(v).slice(2).replace('-', '/') },
+    },
+    yAxis: {
+      type: 'value', scale: true, position: 'right', ...baseAxis(t),
+      axisLabel: { color: t.text3, fontSize: 9.5, formatter: (v) => v.toFixed(v >= 100 ? 0 : 2) },
+      splitLine: { show: true, lineStyle: { color: t.line } },
+    },
+    dataZoom: [{ type: 'inside', start: 0, end: 100 }],
     series: [
       {
-        name: 'K线', type: 'candlestick', data: kdata, xAxisIndex: 0, yAxisIndex: 0,
-        itemStyle: { color: t.up, color0: t.down, borderColor: t.up, borderColor0: t.down, borderWidth: 1 },
-        barMaxWidth: 7, z: 3,
+        name: '收盘', type: 'line', data: closes, showSymbol: false, smooth: false, z: 3,
+        lineStyle: { width: 1.6, color: t.accent },
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(216,168,78,.18)' }, { offset: 1, color: 'rgba(216,168,78,0)' },
+        ]) },
         markLine: lines.length ? {
           silent: true, symbol: 'none',
-          lineStyle: { color: t.accent, type: 'dashed', width: 1, opacity: 0.55 },
+          lineStyle: { color: t.accent, type: 'dashed', width: 1, opacity: 0.5 },
           label: { color: t.accent, fontSize: 9, position: 'insideEndTop', formatter: (p) => p.name },
           data: lines.map((l) => ({ yAxis: l.value, name: l.label })),
         } : undefined,
       },
       ...maSeries,
-      { name: '买入', type: 'scatter', data: buyPts, xAxisIndex: 0, yAxisIndex: 0, symbol: 'triangle', symbolSize: 10, itemStyle: { color: t.up, borderColor: '#fff', borderWidth: 1 }, z: 6 },
-      { name: '卖出', type: 'scatter', data: sellPts, xAxisIndex: 0, yAxisIndex: 0, symbol: 'triangle', symbolRotate: 180, symbolSize: 10, itemStyle: { color: t.down, borderColor: '#fff', borderWidth: 1 }, z: 6 },
-      { name: '分红', type: 'scatter', data: divPts, xAxisIndex: 0, yAxisIndex: 0, symbol: 'diamond', symbolSize: 8, itemStyle: { color: t.accent, borderColor: '#fff', borderWidth: 1 }, z: 5 },
-      { name: '成交量', type: 'bar', data: vols, xAxisIndex: 1, yAxisIndex: 1, barMaxWidth: 6, z: 2 },
+      { name: '买入', type: 'scatter', data: buyPts, symbol: 'triangle', symbolSize: 9, itemStyle: { color: t.up, borderColor: '#fff', borderWidth: 1 }, z: 6 },
+      { name: '卖出', type: 'scatter', data: sellPts, symbol: 'triangle', symbolRotate: 180, symbolSize: 9, itemStyle: { color: t.down, borderColor: '#fff', borderWidth: 1 }, z: 6 },
+      { name: '分红', type: 'scatter', data: divPts, symbol: 'diamond', symbolSize: 7, itemStyle: { color: t.accent, borderColor: '#fff', borderWidth: 1 }, z: 5 },
     ],
   });
   return ch;
@@ -426,7 +425,7 @@ function deferred(fn) {
   };
 }
 
-export const drawCandleChart = deferred(drawCandleChartImpl);
+export const drawPriceChart = deferred(drawPriceChartImpl);
 export const drawPortfolioChart = deferred(drawPortfolioChartImpl);
 export const drawNavChart = deferred(drawNavChartImpl);
 export const drawDonut = deferred(drawDonutImpl);

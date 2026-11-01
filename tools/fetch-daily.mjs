@@ -114,13 +114,12 @@ async function main() {
     } catch (e) {
       try { await sleep(350); rows = await fetchDay(code, BARS); } catch (e2) { fail++; fails.push(code); return; }
     }
-    const o = [], h = [], l = [], c = [], v = [];
+    const c = [];
     for (const d of cal) {
       const r = rows.get(d);
-      if (r) { o.push(r[0]); h.push(r[1]); l.push(r[2]); c.push(r[3]); v.push(r[4]); }
-      else { o.push(null); h.push(null); l.push(null); c.push(null); v.push(null); }
+      c.push(r ? r[3] : null);   // 只要收盘价：回测/图表都只用收盘，开高低量不落盘（90KB → 17KB）
     }
-    const json = JSON.stringify({ o, h, l, c, v });
+    const json = JSON.stringify({ c });
     fs.writeFileSync(file, json);
     bytes += json.length;
     ok++;

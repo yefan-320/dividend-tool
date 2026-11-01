@@ -155,7 +155,7 @@ export async function loadDailyMeta() {
 
 /**
  * 单只股票日 K：先用联网（腾讯，不复权），失败回退本地 data/daily/<code>.json。
- * @returns {Promise<{cal:string[],o:number[],h:number[],l:number[],c:number[],v:number[]}|null>}
+ * @returns {Promise<{cal:string[],c:number[]}|null>} 只有收盘价：回测和图表都只用收盘
  */
 export async function loadDaily(code) {
   const key = String(code);
@@ -167,8 +167,9 @@ export async function loadDaily(code) {
   } catch (e) { out = null; }
   if (!out) {
     try {
+      // 本地日 K 只存收盘：{ c: [...] }（对齐 meta.cal，停牌为 null）
       const j = await getJson(`daily/${key}.json`);
-      if (j && Array.isArray(j.c)) out = { cal: meta.cal, o: j.o, h: j.h, l: j.l, c: j.c, v: j.v };
+      if (j && Array.isArray(j.c)) out = { cal: meta.cal, c: j.c };
     } catch (e) { out = null; }
   }
   if (out && out.network !== false) out = { ...out, source: out.cal === meta.cal ? 'network' : 'local' };
