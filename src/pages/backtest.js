@@ -642,7 +642,12 @@ function rangePeakDy(code, from, to) {
     const dps = prevDps(divs, code, y);
     if (!(dps > 0)) continue;
     for (const md of ['-04-30', '-12-31']) {
-      const p = priceAt(s, `${y}${md}`);
+      const day = `${y}${md}`;
+      // 采样点必须落在区间内：否则「第一次买入之前」会把买入之后那段
+      // （股息率已经够线、早就买了的日子）算进来，算出的峰值比门槛还高，自相矛盾
+      if (to && day > to) continue;
+      if (from && day < from) continue;
+      const p = priceAt(s, day);
       if (p > 0) best = Math.max(best, (dps / p) * 100);
     }
   }
@@ -673,8 +678,10 @@ function renderStockPage(market, structureData) {
   const st = r.stats;
   const vc = st.cagr >= 0 ? 'up' : 'down';
   // 买得少 / 一次没买的时候要说清楚为什么，别让人以为「数据不对」
-  const peakDy = rangePeakDy(code, btState.from, btState.to);
   const firstBuy = r.trades.find((t) => t.type === '买入');
+  // 只买过一次时，看的是「第一次买入之前」那段的最高股息率——
+  // 拿全区间去说「这几年最高只到 6.2%」，比门槛还高，自己打自己脸
+  const peakDy = rangePeakDy(code, btState.from, st.buys === 1 && firstBuy ? firstBuy.date : btState.to);
   const idle = st.buys === 0
     ? `<div class="banner warn block" style="margin:0 0 14px">
         <b>这 ${num(st.years, 0)} 年一次都没买。</b>
@@ -685,7 +692,7 @@ function renderStockPage(market, structureData) {
     : st.buys === 1 && firstBuy && Number(firstBuy.date.slice(0, 4)) - Number(String(clampFrom(btState.from)).slice(0, 4)) >= 2
       ? `<div class="banner block" style="margin:0 0 14px">
           <b>规则一直等到 ${esc(firstBuy.date)} 才第一次买入。</b>
-          ${esc(nameOf(code))} 这几年股息率最高只到 <b>${num(peakDy, 1)}%</b>，第一次够着 ${num(btState.minDy, 1)}% 的线就是那时候。
+          ${esc(nameOf(code))} 在那之前的股息率最高只到 <b>${num(peakDy, 1)}%</b>，第一次够着 ${num(btState.minDy, 1)}% 的线就是那一天。
           在那之前钱一直吃着 1.5% 的现金利息，所以规则跑不过「第一天就买入」——
           <b>买入持有 ${bigMoney(r.endHold)}</b> vs 规则 ${bigMoney(r.end)}，差的就是等的这些年。
         </div>`
