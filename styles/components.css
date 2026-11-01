@@ -345,6 +345,7 @@
   color: var(--text-2);
   line-height: 1.55;
 }
+.banner.block { display: block; }
 .banner.warn { border-color: rgba(224, 163, 62, .25); background: rgba(224, 163, 62, .06); }
 .banner.danger { border-color: rgba(229, 83, 75, .25); background: rgba(229, 83, 75, .06); }
 .banner svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px; }

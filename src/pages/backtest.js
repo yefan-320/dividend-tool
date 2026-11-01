@@ -8,7 +8,7 @@ import {
   db, loadMonthly, loadFinanceHistory, loadDailyMeta, loadDailyMany, loadIndexDaily,
   nameOf, quote, ensureDividends,
 } from '../data.js';
-import { buildSeries, buildTradingDates, monthEnd, priceAt, maxDrawdown } from '../engine/market.js';
+import { buildSeries, buildTradingDates, monthEnd, priceAt, maxDrawdown, prevDps } from '../engine/market.js';
 import { runPortfolioBacktest } from '../engine/portfolioBacktest.js';
 import { runStockBacktest } from '../engine/stockBacktest.js';
 import { runPlanBacktest } from '../engine/backtest.js';
@@ -36,7 +36,7 @@ export const btState = {
   to: null,
   capital: 1000000,
   monthlyAdd: 0,
-  stock: '601398',
+  stock: '600036',      // 默认招商银行：打开就能看到一套真实跑起来的回测
   minDy: 5,
   quality: false,         // 个股回测质量筛选：默认关（只看走势，不拉财报）
   metric: 'nav',
@@ -246,7 +246,7 @@ function paramBar(opts = {}) {
       <label class="bt-field"><span>月追加(元)</span><input class="input" type="number" id="btMon" min="0" step="500" value="${btState.monthlyAdd}"></label>
       ${opts.minDy ? `<label class="bt-field"><span>买入股息率≥</span><input class="input" type="number" id="btMinDy" min="0" max="10" step="0.5" value="${btState.minDy}"></label>` : ''}
       ${opts.quality ? `<label class="bt-field bt-check"><input type="checkbox" id="btQuality"${btState.quality ? ' checked' : ''}><span>质量筛选（加载财报，较慢）</span></label>` : ''}
-      <button class="btn primary" id="btRun">${icon('refresh')} 重跑</button>
+      <button class="btn primary" id="btRun" style="margin-left:auto">${icon('refresh')} 重跑</button>
     </div>
     <div class="bt-param-row" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
       <span class="bt-hint">快捷区间</span>
@@ -630,6 +630,25 @@ function renderPort(market, structureData) {
 
 /* ---------------- 个股回测 ---------------- */
 
+/** 区间内股息率最高值（%）。按年取 4/12 月末价格，每股分红用上一年度 —— 跟引擎同一口径。 */
+function rangePeakDy(code, from, to) {
+  const s = ctx.market?.series?.get(code);
+  if (!s) return 0;
+  const divs = db.baseline.dividends || {};
+  const y0 = Number(String(from || '').slice(0, 4));
+  const y1 = Number(String(to || '').slice(0, 4));
+  let best = 0;
+  for (let y = y0; y <= y1; y++) {
+    const dps = prevDps(divs, code, y);
+    if (!(dps > 0)) continue;
+    for (const md of ['-04-30', '-12-31']) {
+      const p = priceAt(s, `${y}${md}`);
+      if (p > 0) best = Math.max(best, (dps / p) * 100);
+    }
+  }
+  return best;
+}
+
 function renderStockPage(market, structureData) {
   const code = btState.stock;
   const s = market.series.get(code);
@@ -653,18 +672,35 @@ function renderStockPage(market, structureData) {
   ctx.stock = r;
   const st = r.stats;
   const vc = st.cagr >= 0 ? 'up' : 'down';
-  const chips = [...new Set([...(structureData.holdings || []).map((h) => h.code), '000333', '600036', '601318', '601088', '600900'])].slice(0, 8);
+  // 买得少 / 一次没买的时候要说清楚为什么，别让人以为「数据不对」
+  const peakDy = rangePeakDy(code, btState.from, btState.to);
+  const firstBuy = r.trades.find((t) => t.type === '买入');
+  const idle = st.buys === 0
+    ? `<div class="banner warn block" style="margin:0 0 14px">
+        <b>这 ${num(st.years, 0)} 年一次都没买。</b>
+        ${esc(nameOf(code))} 的股息率最高只到 <b>${num(peakDy, 1)}%</b>，从没碰到 ${num(btState.minDy, 1)}% 的买入线——
+        所以上面这些收益全是<b>现金利息 1.5%/年</b>，一分股票都没买。
+        把「买入股息率≥」调低到 ${peakDy > 0 ? num(Math.max(1, Math.floor(peakDy * 10) / 10), 1) : '4'}% 以下再跑，或者换一只股票。
+      </div>`
+    : st.buys === 1 && firstBuy && Number(firstBuy.date.slice(0, 4)) - Number(String(clampFrom(btState.from)).slice(0, 4)) >= 2
+      ? `<div class="banner block" style="margin:0 0 14px">
+          <b>规则一直等到 ${esc(firstBuy.date)} 才第一次买入。</b>
+          ${esc(nameOf(code))} 这几年股息率最高只到 <b>${num(peakDy, 1)}%</b>，第一次够着 ${num(btState.minDy, 1)}% 的线就是那时候。
+          在那之前钱一直吃着 1.5% 的现金利息，所以规则跑不过「第一天就买入」——
+          <b>买入持有 ${bigMoney(r.endHold)}</b> vs 规则 ${bigMoney(r.end)}，差的就是等的这些年。
+        </div>`
+      : '';
   return `
   ${paramBar({ tabs: false, minDy: true, quality: true })}
-  <div class="row" style="gap:6px;flex-wrap:wrap;margin:0 0 12px">
-    ${chips.map((c) => `<button class="btn sm ${c === code ? 'primary' : 'ghost'}" data-stockpick="${c}">${esc(nameOf(c))}</button>`).join('')}
-    <div class="stock-search-wrap" style="width:300px;margin:0">
-      <div class="stock-search"><input id="stSearch" placeholder="代码或名称，如 600519 / 茅台" autocomplete="off" spellcheck="false" value="${esc(code)}"></div>
+  <div class="stock-pick-row">
+    <div class="stock-search-wrap">
+      <div class="stock-search">${icon('search')}<input id="stSearch" placeholder="换一只：600036 / 招商银行 / 招行" autocomplete="off" spellcheck="false"><kbd>Enter</kbd></div>
       <div id="stSuggest" class="search-suggest" hidden></div>
     </div>
+    <div class="stock-pick-now">${esc(nameOf(code))} <span class="mono">${esc(code)}</span></div>
   </div>
   ${hero({
-    kicker: `个股回测 · ${esc(nameOf(code))} ${esc(code)} · ${clampFrom(btState.from)} → ${btState.to} · 本金 ${bigMoney(btState.capital)}`,
+    kicker: `个股回测 · ${esc(nameOf(code))} ${esc(code)} · ${clampFrom(btState.from)} → ${btState.to}`,
     main: `年化 <b class="num gold">${pctSign(st.cagr == null ? null : st.cagr * 100, 1)}</b> <span class="thin">，期末 ${bigMoney(r.end)} · 买入持有 ${pctSign(st.cagrHold == null ? null : st.cagrHold * 100, 1)}</span>`,
     desc: `买点 ${st.buys} 次 · 卖点 ${st.sells} 次 · 分红 ${bigMoney(r.totalDiv)} · 最大回撤 ${pct(st.mdd * 100, 1)} · vs 中证红利全收益 ${pctSign(st.excess == null ? null : st.excess * 100, 1)}/年`,
     stats: [
@@ -674,9 +710,15 @@ function renderStockPage(market, structureData) {
       { k: '分红', v: bigMoney(r.totalDiv), cls: 'gold', s: `年化股息 ${pct((r.totalDiv / Math.max(1, st.years) / btState.capital) * 100, 1)}` },
     ],
   })}
+  ${idle}
+
+  <section class="panel fade-in" style="margin-top:14px">
+    <div class="panel-head"><span class="panel-title">净值曲线</span><span class="section-note">规则 vs 买入持有 vs 中证红利全收益 · 下方是回撤</span></div>
+    <div class="panel-body" style="padding:8px 10px 4px"><div id="stNav" class="chart" style="height:380px"></div></div>
+  </section>
 
   ${metricGrid([
-    { k: '期末', v: bigMoney(r.end), s: '现金 + 持仓', key: 'nav', on: true },
+    { k: '期末', v: bigMoney(r.end), s: '现金 + 持仓', key: 'nav', on: btState.metric === 'nav' || !btState.metric },
     { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: 'XIRR / 复利', key: 'ann' },
     { k: '最大回撤', v: pct(st.mdd * 100, 1), cls: 'down', s: `${esc(st.mddPeak)} → ${esc(st.mddTrough)}`, key: 'dd' },
     { k: '分红', v: bigMoney(r.totalDiv), cls: 'gold', s: '累计到账', key: 'div' },
@@ -685,15 +727,7 @@ function renderStockPage(market, structureData) {
   ])}
   <div id="metricDetail" style="margin-top:12px"></div>
 
-  <section class="panel fade-in" style="margin-top:14px">
-    <div class="panel-head"><span class="panel-title">日 K · 买卖点 / 分红</span><span class="section-note">收盘线 + MA20/MA60 · 红▲买入 绿▼卖出 金◆分红</span></div>
-    <div class="panel-body" style="padding:8px 10px 4px"><div id="stChart" class="chart" style="height:380px"></div></div>
-  </section>
-
-  <section class="panel fade-in" style="margin-top:14px">
-    <div class="panel-head"><span class="panel-title">净值曲线</span><span class="section-note">规则 vs 买入持有 vs 中证红利全收益 · 下方回撤</span></div>
-    <div class="panel-body" style="padding:8px 10px 4px"><div id="stNav" class="chart" style="height:320px"></div></div>
-  </section>
+  ${fold('kline', '日 K · 买卖点 / 分红', `收盘线 + MA20/MA60 · 红▲买入 绿▼卖出 金◆分红 · ${r.trades.length} 笔操作`, '<div class="panel-body" style="padding:8px 10px 4px"><div id="stChart" class="chart" style="height:380px"></div></div>')}
 
   <section class="panel fade-in" style="margin-top:14px">
     <div class="panel-head"><span class="panel-title">年度收益</span><span class="section-note">规则净值 / 分红 / 年末现金</span></div>
@@ -957,9 +991,6 @@ export function bindBacktest() {
   document.querySelectorAll('[data-add]').forEach((b) => {
     b.onclick = () => { btState.monthlyAdd = Number(b.dataset.add); rerender(); };
   });
-  document.querySelectorAll('[data-stockpick]').forEach((b) => {
-    b.onclick = () => { btState.stock = b.dataset.stockpick; rerenderUrl(); };
-  });
   const search = document.getElementById('stSearch');
   if (search) {
     mountStockSearch(search, {
@@ -969,6 +1000,17 @@ export function bindBacktest() {
         btState.stock = c;
         rerenderUrl();
       },
+    });
+  }
+  // 日 K 折叠着：展开那一刻再画（藏在 display:none 里画出来是 0 宽）
+  const klineFold = document.querySelector('[data-fold="kline"]');
+  if (klineFold) {
+    klineFold.addEventListener('toggle', () => {
+      if (!klineFold.open) return;
+      const box = document.getElementById('stChart');
+      const inst = window.echarts?.getInstanceByDom(box);
+      if (inst) inst.resize();
+      else drawStockKline();
     });
   }
   document.querySelectorAll('[data-metric]').forEach((card) => {
@@ -1051,7 +1093,10 @@ export function bindBacktest() {
     });
   }
 
-  if (btState.mode === 'stock' && ctx.stock) { drawStockPageCharts(); renderStockMetric(btState.metric || 'nav'); }
+  if (btState.mode === 'stock' && ctx.stock) {
+    drawStockPageCharts();
+    if (btState.metric && btState.metric !== 'nav') renderStockMetric(btState.metric);   // nav 就是上面那张大图，别再画一遍、也别滚屏
+  }
   if (btState.mode === 'cmp' && ctx.compareRows) drawCompareChart();
 
   document.querySelectorAll('details.fold').forEach((d) => {
@@ -1102,6 +1147,15 @@ function readParams() {
 
 function drawStockPageCharts() {
   const r = ctx.stock;
+  // 净值曲线是重点，直接画；日 K 在折叠里，展开时才画（见 bindBacktest 的 toggle）
+  drawNavChart(document.getElementById('stNav'), { nav: r.nav, bench: r.bench, dd: drawdownOf(r.nav), hold: r.navHold, capital: btState.capital });
+  const klineFold = document.querySelector('[data-fold="kline"]');
+  if (klineFold && klineFold.open) drawStockKline();
+}
+
+function drawStockKline() {
+  const r = ctx.stock;
+  if (!r) return;
   const daily = ctx.market.daily.get(btState.stock);
   const marks = [];
   for (const t of r.trades) {
@@ -1127,7 +1181,6 @@ function drawStockPageCharts() {
     if (p > 0) marks.push({ date: `${y}-04-30`, price: p, kind: 'div', why: `分红 ${(amt / 10000).toFixed(1)}万` });
   }
   drawPriceChart(document.getElementById('stChart'), candleRows, { marks });
-  drawNavChart(document.getElementById('stNav'), { nav: r.nav, bench: r.bench, dd: drawdownOf(r.nav), hold: r.navHold, capital: btState.capital });
 }
 
 function drawStockManual(code) {
@@ -1149,6 +1202,12 @@ function renderStockMetric(key) {
   const box = document.getElementById('metricDetail');
   const r = ctx.stock;
   if (!box || !r) return;
+  // 「期末」那张卡对应的就是上面的大图，别在下面再画一条一样的
+  if (key === 'nav') {
+    box.innerHTML = '';
+    document.getElementById('stNav')?.closest('section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
   const cap = btState.capital;
   const nav0 = r.nav[0]?.[1] || cap;
   const navW = (arr) => arr.map(([d, v]) => [d, +(v / 10000).toFixed(1)]);

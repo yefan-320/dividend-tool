@@ -68,6 +68,17 @@
 
 /* ============ 个股 ============ */
 .stock-search-wrap { position: relative; z-index: 30; margin-bottom: 14px; }
+/* 回测页的「换一只」：搜索框独占一行，右边显示当前是哪只 */
+.stock-pick-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+.stock-pick-row .stock-search-wrap { flex: 1 1 320px; max-width: 520px; margin: 0; }
+.stock-pick-now {
+  font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap;
+  padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+}
+.stock-pick-now .mono { font-weight: 500; font-size: 10.5px; color: var(--text-3); margin-left: 4px; }
 .stock-search {
   display: flex;
   align-items: center;

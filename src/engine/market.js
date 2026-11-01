@@ -63,7 +63,15 @@ export function priceAt(series, date) {
       lo = mid + 1;
     } else hi = mid - 1;
   }
-  return ans >= 0 ? closes[ans] : null;
+  if (ans < 0) return null;
+  /* 停牌 / 数据缺口的空值（null）往前找最近一个有效价。
+     以前直接返回 null，下游 shares × null = 0，净值一天之内从 95 万掉到 745 块，
+     再顺手把最大回撤算成 -99.9%。一只股票只要有几天数据是空的，回测就废了。 */
+  for (let i = ans; i >= 0; i--) {
+    const v = closes[i];
+    if (v > 0) return v;
+  }
+  return null;
 }
 
 /**

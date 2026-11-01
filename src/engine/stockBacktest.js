@@ -29,10 +29,18 @@ const DAY_RATE = 0.015 / 365;
  */
 export function runStockBacktest(o) {
   const {
-    code, dates, series, dividends = {}, finHistory = {},
+    code, series, dividends = {}, finHistory = {},
     capital = 1000000, monthlyAdd = 0, minDy = 5, benchmarkSeries = null, from, to,
     useQuality = true,   // false = 只看走势，不拿财报做质量筛选（也就不需要下财报）
   } = o;
+  /* 区间要在这里裁：上游传进来的是全市场日历（2014-06 起），
+     不裁的话页面上写「2016-10-30 →」，净值曲线却从 2014-06 画起，年化也按错的年数算。 */
+  const all = o.dates || [];
+  let lo = 0;
+  let hi = all.length - 1;
+  if (from) { const i = all.findIndex((d) => d >= from); if (i >= 0) lo = i; }
+  if (to) { for (let i = all.length - 1; i >= lo; i--) { if (all[i] <= to) { hi = i; break; } } }
+  const dates = lo <= hi ? all.slice(lo, hi + 1) : all;
   const px = (date) => priceAt(series, date);
   const nav = [];
   const navHold = [];
