@@ -127,6 +127,7 @@ node tools/check-static.mjs    # 静态检查：index.html / sw.js SHELL / impor
 node tools/smoke-all.mjs       # 浏览器全站冒烟：5 页 + 4 选股视图 + 3 我的视图 + 方案编辑/执行清单 + 深浅色 + 移动端（36 项）
 node tools/audit-app.mjs       # 数据覆盖/一致性/异常值/新鲜度 + 引擎自检
 node tools/check-budget.mjs    # 首屏性能预算：核心数据/JS gzip 体积、懒加载结构、SW 预缓存
+node tools/check-xss.mjs       # XSS/转义审计（需 8766 + Chrome 9222；CI 里跟冒烟一起跑）
 node tools/perf.mjs            # 冷/热加载性能（含 ECharts 按需加载核验）
 node tools/perf-boot.mjs       # 首屏启动：本地 vs 慢 4G + 4x CPU（骨架出现时间 / 完整首屏）
 node tools/perf-render.mjs     # 各页面 render() 耗时（CPU 4x，比较优化前后）
@@ -134,7 +135,7 @@ node tools/shot.js             # 界面截图 → ../report/design/
 ```
 
 `npm run verify` = 单测 + 静态检查 + 性能预算 + 数据体检（不需要浏览器）；`npm run smoke` / `npm run perf` 需要本地 8766 + Chrome 9222。
-每次 `git push main` 后 GitHub Actions 会自动跑五项：177 单测 + 静态检查 + 数据体检 + 首屏性能预算 + 浏览器冒烟 36 项（`.github/workflows/test.yml`，CI 里自起静态服务与无头 Chrome）；另有每日线上健康检查（`.github/workflows/health.yml`）。失败会在仓库 Actions 页提示。
+每次 `git push main` 后 GitHub Actions 会自动跑六项：177 单测 + 静态检查 + 数据体检 + 首屏性能预算 + 浏览器冒烟 36 项 + XSS 审计（`.github/workflows/test.yml`，CI 里自起静态服务与无头 Chrome）；另有每日线上健康检查（`.github/workflows/health.yml`）。失败会在仓库 Actions 页提示。
 
 当前结果：
 
@@ -150,6 +151,7 @@ node tools/shot.js             # 界面截图 → ../report/design/
 - **行情**：启动后后台批量刷新全市场（qt.gtimg.cn，80 只/批，10 分钟缓存），侧栏显示「已更新 HH:MM」；失败自动用本地快照。
 - **日 K**：看哪只拉哪只（腾讯 newfqkline，不复权），IndexedDB 缓存 6 小时；本地只常驻 7 只演示持仓作为离线兜底。
 - **离线**：`?offline=1` 或在断网时，页面用本地快照 + 月线近似，核心页面不白屏。
+- **离线回测**：「我的 → 设置 → 离线回测数据」可一键把月线/历史财报/指数日线缓存进 Service Worker（约 13MB），之后断网也能打开回测页。
 - **隐私**：只请求腾讯公开行情接口，不上传本地持仓；数据仍只存在浏览器 localStorage / IndexedDB。
 
 ## 回测口径与局限

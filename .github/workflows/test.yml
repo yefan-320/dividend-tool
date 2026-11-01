@@ -31,3 +31,4 @@ jobs:
           "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --disable-crash-reporter --remote-debugging-port=9222 --user-data-dir=/tmp/d3-chrome about:blank >/tmp/chrome.log 2>&1 &
           for i in $(seq 1 30); do curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null && break; sleep 1; done
           node tools/smoke-all.mjs
+          node tools/check-xss.mjs

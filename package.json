@@ -16,6 +16,7 @@
     "fetch:daily": "node tools/fetch-daily.mjs",
     "fetch:finance": "node tools/fetch-finance.mjs 2011 2025",
     "derivatives": "node tools/build-derivatives.mjs",
-    "budget": "node tools/check-budget.mjs"
+    "budget": "node tools/check-budget.mjs",
+    "xss": "node tools/check-xss.mjs"
   }
 }

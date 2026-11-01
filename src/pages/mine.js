@@ -168,6 +168,10 @@ function settingsView() {
         <div class="settings-in"><input class="input" id="setCash" type="number" step="10000" min="0" max="1000000000000" value="${Math.round(cash)}"><em>元</em></div>
       </div>
       <div class="settings-row">
+        <div><div class="settings-k">离线回测数据</div><div class="settings-s">回测需要月线 ~9MB + 历史财报 ~4.4MB + 指数日线；缓存后可离线回测</div></div>
+        <div class="settings-in"><span class="section-note" id="cacheStatus">检查中…</span><button class="btn ghost" id="prefetchCacheBtn">${icon('download')} 缓存回测数据</button></div>
+      </div>
+      <div class="settings-row">
         <div><div class="settings-k">行情更新</div><div class="settings-s">打开页面会自动在后台拉一次全市场行情；也可以手动刷新（失败自动用本地快照）</div></div>
         <div class="settings-in"><span class="section-note" id="quoteRefreshInfo">行情 ${esc(db.generated || '—')}</span><button class="btn ghost" id="refreshQuotesBtn">${icon('refresh')} 立即刷新</button></div>
       </div>
@@ -383,6 +387,43 @@ export function bindMine() {
       } catch (e) {
         toast('导入失败：' + e.message);
       }
+    };
+  }
+
+  // 离线回测数据：把月线 / 历史财报 / 指数日线缓存进 Service Worker，之后断网也能回测
+  const prefetchBtn = document.getElementById('prefetchCacheBtn');
+  const cacheStatus = document.getElementById('cacheStatus');
+  const OFFLINE_FILES = ['data/monthly.json', 'data/finance-history.json', 'data/index-daily.json'];
+  const offlineUrls = () => OFFLINE_FILES.map((f) => new URL('../../' + f, import.meta.url).href);
+  const refreshCacheStatus = async () => {
+    if (!cacheStatus) return;
+    if (!('caches' in window)) { cacheStatus.textContent = '不支持离线缓存'; return; }
+    if (!navigator.serviceWorker?.controller) { cacheStatus.textContent = '刷新页面一次后可用'; return; }
+    try {
+      const hits = await Promise.all(offlineUrls().map((u) => caches.match(u, { ignoreSearch: true }).then(Boolean)));
+      const done = hits.filter(Boolean).length;
+      cacheStatus.textContent = done === hits.length ? '已缓存 · 可离线回测' : `未缓存 ${hits.length - done}/${hits.length}`;
+    } catch (e) { cacheStatus.textContent = '状态未知'; }
+  };
+  if (prefetchBtn) {
+    refreshCacheStatus();
+    prefetchBtn.onclick = async () => {
+      if (!navigator.serviceWorker?.controller) { toast('请先刷新页面一次（离线缓存需要 Service Worker 生效）'); return; }
+      prefetchBtn.disabled = true;
+      const urls = offlineUrls();
+      let done = 0;
+      for (const [i, u] of urls.entries()) {
+        if (cacheStatus) cacheStatus.textContent = `缓存中… ${i}/${urls.length}`;
+        try {
+          const res = await fetch(u, { cache: 'reload' });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          await res.arrayBuffer(); // 确保完整下载，SW 会顺手写入缓存
+          done++;
+        } catch (e) { /* 单个失败继续，最后统一提示 */ }
+      }
+      prefetchBtn.disabled = false;
+      toast(done === urls.length ? '回测数据已缓存，可离线使用' : `缓存未完成 ${done}/${urls.length}，请检查网络后重试`);
+      refreshCacheStatus();
     };
   }
 }

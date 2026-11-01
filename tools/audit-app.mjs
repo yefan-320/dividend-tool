@@ -67,6 +67,30 @@ if (stale > stats.quotes * 0.01) push('warn', `行情有 ${stale} 只不是最�
   if (finAge != null && finAge > 1) push('warn', `年报数据停在 ${finCur.year} 年，建议 node tools/fetch-finance.mjs`);
 }
 
+/* 2.6 行情 vs 月线一致性：最新价与月线最后一根收盘应基本一致（同月/相邻月末）；异常占比高说明数据不同步 */
+{
+  let samples = 0, over5 = 0, sumAbs = 0, maxDiff = 0, maxCode = '';
+  for (const [code, q] of Object.entries(quotes.quotes || {})) {
+    const rows = monthly[code];
+    if (!rows || !rows.length) continue;
+    const close = rows[rows.length - 1][1];
+    if (!(q?.p > 0) || !(close > 0)) continue;
+    const d = Math.abs(q.p / close - 1) * 100;
+    samples++;
+    sumAbs += d;
+    if (d > 5) over5++;
+    if (d > maxDiff) { maxDiff = d; maxCode = code; }
+  }
+  stats.quoteMonthly = {
+    samples, over5pct: over5,
+    meanAbsDiff: +(sumAbs / Math.max(1, samples)).toFixed(2),
+    maxDiff: +maxDiff.toFixed(1), maxCode,
+  };
+  if (samples && over5 / samples > 0.01) {
+    push('warn', `行情与月线最后收盘偏差 >5% 的有 ${over5}/${samples} 只（最大 ${maxDiff.toFixed(1)}% @${maxCode}），数据可能不同步`);
+  }
+}
+
 /* 3. 股息率分布 + 异常值 */
 const rows = [];
 for (const [code, info] of Object.entries(baseline.pool || {})) {
