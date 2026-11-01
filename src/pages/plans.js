@@ -23,6 +23,7 @@ import { openBuyModal } from '../ui/buy.js';
 import { icon } from '../ui/icons.js';
 import { esc, num } from '../ui/format.js';
 import { toast } from '../ui/toast.js';
+import { searchStocks, loadNameIndex } from '../ui/stockSearch.js';
 
 const state = { mode: 'list', editing: null, detailId: null, unit: 'pct' };
 const HUES = [38, 188, 265, 146, 6, 320, 96, 210, 174, 286];
@@ -759,15 +760,19 @@ export function bindPlans() {
 export function openStockPicker({ exclude = [], onPick } = {}) {
   const pool = Object.keys(db.baseline?.pool || {});
   const all = [...new Set([...Object.keys(db.quotes || {}), ...pool])];
+  loadNameIndex();
   const renderList = (kw) => {
     const q = String(kw || '').trim();
-    const out = [];
-    for (const code of all) {
-      if (exclude.includes(code)) continue;
-      const name = nameOf(code);
-      if (q && !code.includes(q) && !String(name).includes(q)) continue;
-      out.push({ code, name });
-      if (out.length >= 30) break;
+    let out;
+    if (q) {
+      // 统一搜索引擎：代码 / 中文名（包含即可）/ 行业
+      out = searchStocks(q, { limit: 30, exclude }).map((r) => ({ code: r.code, name: r.name }));
+      if (!out.length) {
+        // 索引还没到、或池子里没有：退回按代码包含
+        out = all.filter((c) => !exclude.includes(c) && c.includes(q)).slice(0, 30).map((c) => ({ code: c, name: nameOf(c) }));
+      }
+    } else {
+      out = all.filter((c) => !exclude.includes(c)).slice(0, 30).map((c) => ({ code: c, name: nameOf(c) }));
     }
     if (!out.length) return '<div class="pick-empty">没找到，换个代码或名称试试</div>';
     return out.map(({ code, name }) => `<button class="pick-item" data-pick="${esc(code)}">
@@ -779,9 +784,9 @@ export function openStockPicker({ exclude = [], onPick } = {}) {
   openModal({
     title: '添加股票',
     width: '560px',
-    body: `<input class="input" id="pickQ" placeholder="输入代码或名称，例如 600036 / 银行" autocomplete="off">
+    body: `<input class="input" id="pickQ" placeholder="输入代码或名称，例如 600519 / 茅台 / 银行" autocomplete="off">
       <div class="pick-list" id="pickList"></div>
-      <div class="modal-hint">按代码或名称搜索；右侧是当前股息率</div>`,
+      <div class="modal-hint">代码、名称、行业都能搜；右侧是当前股息率</div>`,
     actions: [{ label: '取消', kind: 'ghost' }],
     onMount: (root) => {
       const input = root.querySelector('#pickQ');

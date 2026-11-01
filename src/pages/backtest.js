@@ -21,6 +21,7 @@ import {
 import { icon } from '../ui/icons.js';
 import { toast } from '../ui/toast.js';
 import { esc, num, pct, pctSign, upDown, bigMoney } from '../ui/format.js';
+import { mountStockSearch } from '../ui/stockSearch.js';
 
 const todayStr = () => db.generated || '2026-10-30';
 const DAY = 86400000;
@@ -657,7 +658,10 @@ function renderStockPage(market, structureData) {
   ${paramBar({ tabs: false, minDy: true, quality: true })}
   <div class="row" style="gap:6px;flex-wrap:wrap;margin:0 0 12px">
     ${chips.map((c) => `<button class="btn sm ${c === code ? 'primary' : 'ghost'}" data-stockpick="${c}">${esc(nameOf(c))}</button>`).join('')}
-    <div class="stock-search" style="max-width:220px"><input id="stSearch" placeholder="输入 6 位代码" maxlength="6" value="${esc(code)}"></div>
+    <div class="stock-search-wrap" style="width:300px;margin:0">
+      <div class="stock-search"><input id="stSearch" placeholder="代码或名称，如 600519 / 茅台" autocomplete="off" spellcheck="false" value="${esc(code)}"></div>
+      <div id="stSuggest" class="search-suggest" hidden></div>
+    </div>
   </div>
   ${hero({
     kicker: `个股回测 · ${esc(nameOf(code))} ${esc(code)} · ${clampFrom(btState.from)} → ${btState.to} · 本金 ${bigMoney(btState.capital)}`,
@@ -958,9 +962,14 @@ export function bindBacktest() {
   });
   const search = document.getElementById('stSearch');
   if (search) {
-    search.onkeydown = (e) => {
-      if (e.key === 'Enter' && /^\d{6}$/.test(search.value.trim())) { btState.stock = search.value.trim(); rerenderUrl(); }
-    };
+    mountStockSearch(search, {
+      suggest: document.getElementById('stSuggest'),
+      onPick: (c) => {
+        if (!/^\d{6}$/.test(c || '') || c === btState.stock) return;
+        btState.stock = c;
+        rerenderUrl();
+      },
+    });
   }
   document.querySelectorAll('[data-metric]').forEach((card) => {
     card.onclick = () => {

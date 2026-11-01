@@ -10,6 +10,7 @@ import { loadSettings } from './store.js';
 import { toast } from './ui/toast.js';
 import { ensureEcharts } from './charts.js';
 import { closeModal } from './ui/modal.js';
+import { primeNameIndex } from './ui/stockSearch.js';
 
 const PAGES = [
   { id: 'today', label: '今天', icon: 'home', render: renderToday },
@@ -20,7 +21,7 @@ const PAGES = [
 ];
 
 /** 版本号：发版时跟 sw.js 的 SHELL_CACHE、package.json 一起升 */
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 
 const app = document.getElementById('app');
 const sidebar = document.getElementById('sidebar');
@@ -221,6 +222,8 @@ async function boot() {
   app.innerHTML = skeleton();
   // 图表库 338KB，和数据并行下；不 await，谁先到都不耽误
   ensureEcharts().catch(() => {});
+  // 搜索索引 58KB：空闲时补，等用户真打字的时候名字已经在内存里
+  primeNameIndex();
   try {
     await loadCore();
     performance.mark?.('d3-core-done');

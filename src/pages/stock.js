@@ -6,6 +6,7 @@ import { toast } from '../ui/toast.js';
 import { evaluate } from '../engine/verdict.js';
 import { icon } from '../ui/icons.js';
 import { esc, num, pctSign, levelPill, upDown } from '../ui/format.js';
+import { mountStockSearch } from '../ui/stockSearch.js';
 
 const LV = { buy: '可买', wait: '观察', avoid: '回避', hold: '持有', missing: '数据不足' };
 const CHIPS = ['000333', '600036', '601318', '600887', '600941', '601398', '600066'];
@@ -25,9 +26,10 @@ function searchBar() {
   return `<div class="stock-search-wrap fade-in">
     <div class="stock-search">
       ${icon('search')}
-      <input id="stockSearch" placeholder="输入 6 位代码，如 000333" autocomplete="off" spellcheck="false">
+      <input id="stockSearch" placeholder="代码或名称，如 600519 / 茅台 / 白酒" autocomplete="off" spellcheck="false">
       <kbd>Enter</kbd>
     </div>
+    <div id="stockSuggest" class="search-suggest" hidden></div>
   </div>`;
 }
 
@@ -189,9 +191,15 @@ export function bindStock() {
   });
   const search = document.getElementById('stockSearch');
   if (search) {
-    search.onkeydown = (e) => {
-      if (e.key === 'Enter' && /^\d{6}$/.test(search.value.trim())) location.hash = 'stock?code=' + search.value.trim();
-    };
+    const cur = codeFromHash();
+    mountStockSearch(search, {
+      suggest: document.getElementById('stockSuggest'),
+      onPick: (c) => {
+        if (!/^\d{6}$/.test(c || '')) return;
+        if (c === cur) { search.value = ''; window.__rerender?.(); return; }
+        location.hash = 'stock?code=' + c;
+      },
+    });
   }
   const code = codeFromHash();
   const watch = document.getElementById('addWatch');

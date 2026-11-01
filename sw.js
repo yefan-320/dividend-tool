@@ -10,7 +10,7 @@
    首屏和离线外壳都不需要它，放进 SHELL 会让「装好、离线可用」多等约 40% 的下载。
    改由页面空闲时发 warm-charts 消息补缓存（见 WARM / warmAll），
    没补上也不影响在线画图——外壳的 fetch 处理器会把首次取到的文件顺手缓存。 */
-const SHELL_CACHE = 'hongli-shell-v1.2.0';
+const SHELL_CACHE = 'hongli-shell-v1.3.0';
 const DATA_CACHE = 'hongli-data-v1';
 /** 数据和代码分开放；数据量大又天天变，不该被代码改版连坐 */
 const cacheNameFor = (u) => (/\/data\//.test(u) || /\/vendor\//.test(u) ? DATA_CACHE : SHELL_CACHE);
@@ -22,6 +22,7 @@ const SHELL = [
   './src/engine/plan.js', './src/engine/finance.js', './src/engine/portfolio.js', './src/engine/market.js',
   './src/engine/portfolioBacktest.js', './src/engine/stockBacktest.js', './src/engine/backtest.js', './src/engine/verdict.js',
   './src/ui/icons.js', './src/ui/format.js', './src/ui/toast.js', './src/ui/modal.js', './src/ui/buy.js', './src/ui/table.js',
+  './src/ui/stockSearch.js',
   './assets/icon-192.png', './assets/icon-512.png',
   './data/quotes.json', './data/baseline.json', './data/benchmark.json',
   './data/finance-core.json', './data/dy-pct.json',
@@ -33,7 +34,7 @@ const SHELL = [
 ];
 
 /* 暖缓存：不阻塞安装/激活；页面空闲（或首次用到图表页）时再补 */
-const WARM = ['./vendor/echarts.min.js'];
+const WARM = ['./vendor/echarts.min.js', './data/name-idx.txt'];   // 搜索索引 58KB：不占安装预算，空闲时补
 
 async function warmAll(list) {
   const cache = await caches.open(DATA_CACHE);
