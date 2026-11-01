@@ -172,7 +172,10 @@ async function main() {
     { kw: '茅台', code: '600519', name: '贵州茅台', first: true },
     { kw: '格力', code: '000651', name: '格力电器', first: true },
     { kw: '平安', code: '000001', name: '平安银行', first: true },
-    { kw: '招行', code: null, name: null },
+    { kw: '工行', code: '601398', name: '工商银行', first: true },
+    { kw: '招行', code: '600036', name: '招商银行', first: true },
+    { kw: '中石化', code: '600028', name: '中国石化', first: true },
+    { kw: '建行', code: '601939', name: '建设银行', first: true },
     { kw: '招商银行', code: '600036', name: '招商银行', first: true },
     { kw: '白酒', code: '600519', name: '贵州茅台' },
     { kw: '宁德', code: '300750', name: '宁德时代', first: true },
@@ -189,9 +192,6 @@ async function main() {
   const half = await suggest('#scanSearch', '60051');
   const halfOk = (half.items || []).length > 0 && (half.items || []).every((x) => x.meta.startsWith('60051'));
   (halfOk ? pass : fail).push(`选股页 「60051」（半截代码）→ ${(half.items || []).map((x) => x.meta.split(' ')[0]).join(' ')}`);
-
-  const zhaohang = await suggest('#scanSearch', '招行');
-  console.log(`   （「招行」命中 ${zhaohang.items.length} 条：${zhaohang.items.map((x) => x.name).join('、') || '无'}）`);
 
   /* ---- 2. 随机 40 只：全名 ---- */
   const samples = rnd(30);

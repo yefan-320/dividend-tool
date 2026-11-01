@@ -21,7 +21,7 @@ const PAGES = [
 ];
 
 /** 版本号：发版时跟 sw.js 的 SHELL_CACHE、package.json 一起升 */
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.3.1';
 
 const app = document.getElementById('app');
 const sidebar = document.getElementById('sidebar');

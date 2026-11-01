@@ -14,9 +14,24 @@
 
 const IDX_URL = new URL('../../data/name-idx.txt', import.meta.url);
 
-/** @type {{code:string,name:string,ind:string,norm:string,indl:string,cap:number}[]|null} */
+/** @type {{code:string,name:string,ind:string,norm:string,norml:string,indl:string,cap:number}[]|null} */
 let ROWS = null;
 let LOADING = null;
+
+/**
+ * 口语简称。股民嘴上不说「工商银行」说「工行」——
+ * 这类简称在正式名字里一个字都对不上，光靠「名字包含」永远搜不到，得单独记一张表。
+ * （茅台 / 格力 / 宁德 / 万科 这种名字里本来就有，不用写进来）
+ */
+const ALIAS = {
+  工行: '601398', 建行: '601939', 农行: '601288', 中行: '601988',
+  交行: '601328', 招行: '600036', 邮储: '601658',
+  中石油: '601857', 中石化: '600028', 中神华: '601088',
+  招蛇: '001979', 招保万金: '600048',
+};
+
+/** 代码 → 行，给简称表用 */
+const BY_CODE = new Map();
 
 function parse(text) {
   const out = [];
@@ -32,6 +47,8 @@ function parse(text) {
     const norm = name.replace(/\s+/g, '');
     out.push({ code, name, ind, norm, norml: norm.toLowerCase(), indl: ind.toLowerCase(), cap: p[3] === undefined ? 7 : Number(p[3]) });
   }
+  BY_CODE.clear();
+  for (const r of out) BY_CODE.set(r.code, r);
   return out;
 }
 
@@ -68,7 +85,7 @@ function normKey(kw) {
  * 同步搜索。索引没到位时返回 []（挂载层会先显示「正在载入」再重画）。
  *
  * 排序（分数从高到低）：
- *   1000 代码全等
+ *   1000 代码全等 · 950 简称（工行 → 工商银行）
  *    900 代码前缀
  *    880 名字全等
  *    800 名字前缀（同分比市值档：格力 → 格力电器，不是格力博）
@@ -107,6 +124,19 @@ export function searchStocks(kw, { limit = 8, exclude = [] } = {}) {
       if (hits.length >= 300) break;
     }
   }
+
+  // 简称排在所有名字匹配之前（工行 → 工商银行，别人抢不到第一位）
+  const al = ALIAS[k];
+  if (al && !skip.has(al)) {
+    const r = BY_CODE.get(al);
+    if (r) {
+      const at = hits.findIndex((h) => h.code === al);
+      const row = { code: r.code, name: r.name, ind: r.ind, score: 950, cap: r.cap };
+      if (at >= 0) hits[at] = row;
+      else hits.push(row);
+    }
+  }
+
   hits.sort((a, b) => b.score - a.score || a.cap - b.cap || a.code.localeCompare(b.code));
   return hits.slice(0, limit).map(({ code, name, ind }) => ({ code, name, ind }));
 }
