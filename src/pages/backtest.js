@@ -6,7 +6,7 @@
  */
 import {
   db, loadMonthly, loadFinanceHistory, loadDailyMeta, loadDailyMany, loadIndexDaily,
-  nameOf, quote,
+  nameOf, quote, ensureDividends,
 } from '../data.js';
 import { buildSeries, buildTradingDates, monthEnd, priceAt, maxDrawdown } from '../engine/market.js';
 import { runPortfolioBacktest } from '../engine/portfolioBacktest.js';
@@ -37,6 +37,7 @@ export const btState = {
   monthlyAdd: 0,
   stock: '601398',
   minDy: 5,
+  quality: false,         // 个股回测质量筛选：默认关（只看走势，不拉财报）
   metric: 'nav',
   planId: 'current',
 };
@@ -243,6 +244,7 @@ function paramBar(opts = {}) {
       ${opts.useMktCap ? '<button class="btn sm ghost" id="btUseMktCap">用当前市值</button>' : ''}
       <label class="bt-field"><span>月追加(元)</span><input class="input" type="number" id="btMon" min="0" step="500" value="${btState.monthlyAdd}"></label>
       ${opts.minDy ? `<label class="bt-field"><span>买入股息率≥</span><input class="input" type="number" id="btMinDy" min="0" max="10" step="0.5" value="${btState.minDy}"></label>` : ''}
+      ${opts.quality ? `<label class="bt-field bt-check"><input type="checkbox" id="btQuality"${btState.quality ? ' checked' : ''}><span>质量筛选（加载财报，较慢）</span></label>` : ''}
       <button class="btn primary" id="btRun">${icon('refresh')} 重跑</button>
     </div>
     <div class="bt-param-row" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
@@ -642,6 +644,7 @@ function renderStockPage(market, structureData) {
     capital: btState.capital,
     monthlyAdd: btState.monthlyAdd,
     minDy: btState.minDy,
+    useQuality: btState.quality && !!market.finHistory,
     benchmarkSeries: ctx.benchRows,
     from: clampFrom(btState.from),
     to: btState.to,
@@ -651,7 +654,7 @@ function renderStockPage(market, structureData) {
   const vc = st.cagr >= 0 ? 'up' : 'down';
   const chips = [...new Set([...(structureData.holdings || []).map((h) => h.code), '000333', '600036', '601318', '601088', '600900'])].slice(0, 8);
   return `
-  ${paramBar({ tabs: false, minDy: true })}
+  ${paramBar({ tabs: false, minDy: true, quality: true })}
   <div class="row" style="gap:6px;flex-wrap:wrap;margin:0 0 12px">
     ${chips.map((c) => `<button class="btn sm ${c === code ? 'primary' : 'ghost'}" data-stockpick="${c}">${esc(nameOf(c))}</button>`).join('')}
     <div class="stock-search" style="max-width:220px"><input id="stSearch" placeholder="输入 6 位代码" maxlength="6" value="${esc(code)}"></div>
@@ -798,7 +801,9 @@ export async function renderBacktest() {
   const s = structure();
   const planCodes = btState.mode === 'cmp' ? loadPlans().flatMap((p) => (p.holdings || []).map((h) => h.code)) : [];
   const codes = [...new Set([...s.holdings.map((h) => h.code), ...planCodes, btState.stock])];
-  const needFinance = btState.mode !== 'port';
+  // 只拉当前组合/方案里那几只的分红；组合增删改后再进来，这里会补下新增那几只
+  await ensureDividends(codes);
+  const needFinance = btState.mode === 'cmp' || (btState.mode === 'stock' && btState.quality);
   const market = await loadMarket(codes, clampFrom(btState.from), btState.to, {
     finance: needFinance,
     monthly: 'auto',
@@ -1059,6 +1064,8 @@ function readParams() {
   const mon = Number(document.getElementById('btMon')?.value);
   const minDyEl = document.getElementById('btMinDy');
   const minDy = minDyEl ? Number(minDyEl.value) : 5;
+  const qualityEl = document.getElementById('btQuality');
+  if (qualityEl) btState.quality = qualityEl.checked;
   // 非法参数给明确提示并阻止重跑，而不是静默丢弃（用户会以为已经按新参数跑过）
   if (!(from && to && from < to)) { toast('开始日期要早于结束日期'); return false; }
   if (!(Number.isFinite(capW) && capW > 0)) { toast('本金要大于 0（单位：万）'); return false; }

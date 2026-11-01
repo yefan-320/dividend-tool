@@ -95,20 +95,48 @@ async function getText(url, timeout = 12000) {
 
 /* ---------------- 日 K ---------------- */
 
-/** 拉一只股票的日 K（不复权）：[{d,o,h,l,c,v}, ...] */
+/**
+ * 拉一只股票的日 K（不复权）：[{d,o,h,l,c,v}, ...]
+ *
+ * ⚠ 2026-11-01：旧地址 proxy.finance.qq.com/.../newfqkline 开始返回
+ * `{"code":0,"msg":"param error","data":[]}`，所有没本地缓存的股票都拉不到日 K。
+ * 改用 web.ifzq.gtimg.cn/appstock/app/fqkline/get（带 CORS），不带 qfq 参数即不复权。
+ * 单次上限约 2000 根，超过要按日期区间再往前补一段。
+ */
+const KLINE_BASE = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=';
+const KLINE_MAX = 2000;
+
+async function grabKline(qc, from, to, n) {
+  const url = `${KLINE_BASE}${qc},day,${from},${to},${Math.min(n, KLINE_MAX)},`;
+  const j = await getJsonCors(url);
+  const d = j?.data?.[qc];
+  const arr = d && (d.day || d.qfqday);
+  return Array.isArray(arr) ? arr : [];
+}
+
 export async function fetchDailyRaw(code, bars = 3000) {
   const qc = qqCode(code);
-  const url = `https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get?param=${qc},day,,,${bars},`;
-  const j = await getJsonCors(url);
-  const arr = j?.data?.[qc]?.day;
-  if (!Array.isArray(arr) || !arr.length) throw new Error('无日线');
+  let arr = await grabKline(qc, '', '', bars);
+  if (!arr.length) throw new Error('无日线');
+  // 不够长：按日期区间往前补一次（够 10 年回测用就行）
+  if (bars > arr.length) {
+    const first = String(arr[0][0]).slice(0, 10);
+    const fromY = Number(first.slice(0, 4)) - 12;
+    const older = await grabKline(qc, `${fromY}-01-01`, first, bars - arr.length + 5).catch(() => []);
+    const cut = older.filter((r) => String(r[0]).slice(0, 10) < first);
+    if (cut.length) arr = [...cut, ...arr];
+  }
   const out = [];
+  const seen = new Set();
   for (const r of arr) {
     const d = String(r[0]).slice(0, 10);
     const o = Number(r[1]), c = Number(r[2]), h = Number(r[3]), l = Number(r[4]), v = Number(r[5]);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || ![o, c, h, l].every((x) => Number.isFinite(x) && x > 0)) continue;
+    if (seen.has(d)) continue;
+    seen.add(d);
     out.push({ d, o, h, l, c, v: Number.isFinite(v) ? v : 0 });
   }
+  out.sort((a, b) => (a.d < b.d ? -1 : 1));
   if (!out.length) throw new Error('无日线');
   return out;
 }

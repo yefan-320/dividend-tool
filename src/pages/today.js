@@ -1,5 +1,5 @@
 import { portfolioStats } from '../engine/portfolio.js';
-import { db, quote, nameOf, divSummary, dataMeta } from '../data.js';
+import { db, quote, nameOf, divSummary, dataMeta, loadPool } from '../data.js';
 import { evaluate } from '../engine/verdict.js';
 import { loadTxs, loadCash } from '../store.js';
 import { icon } from '../ui/icons.js';
@@ -202,7 +202,9 @@ function dataAgeBadge() {
   return `<span class="data-age${stale ? ' stale' : ''}" title="行情快照 ${esc(db.generated)}${stale ? '，超过 7 天未更新，建议刷新数据' : ''}">${text}</span>`;
 }
 
-export function renderToday() {
+export async function renderToday() {
+  // 今天页要遍历全市场（股息率排序），全池 + 全量分红只有这一页和选股页需要
+  await loadPool();
   const cands = candidates();
   const p = portfolio();
   return `<div class="page-head fade-in">

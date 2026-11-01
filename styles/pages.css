@@ -463,3 +463,22 @@
   .bt-field .input { width: 140px; }
   .bt-field input[type=number] { width: 108px; }
 }
+
+/* ---------- 搜索候选（代码/中文名都能搜） ---------- */
+.search-suggest {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 40;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.45); overflow: hidden; padding: 4px;
+}
+.search-suggest[hidden] { display: none; }
+.sg-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 12px;
+}
+.sg-item b { font-weight: 600; color: var(--text); }
+.sg-item span { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
+.sg-item:hover, .sg-item.on { background: var(--surface-3, rgba(255,255,255,.06)); }
+/* 参数栏里的勾选项 */
+.bt-field.bt-check { flex-direction: row; align-items: center; gap: 7px; }
+.bt-field.bt-check input { width: 14px; height: 14px; accent-color: var(--accent); }
+.bt-field.bt-check span { font-size: 11px; color: var(--text-2); }

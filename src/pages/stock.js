@@ -1,4 +1,4 @@
-import { db, loadDaily, loadMonthly, loadDyPct, loadFinanceExtra, quote, nameOf, divSummary, dataMeta } from '../data.js';
+import { db, loadDaily, loadMonthly, loadDyPct, loadFinanceExtra, quote, nameOf, divSummary, dataMeta, ensureDividends } from '../data.js';
 import { drawPriceChart } from '../charts.js';
 import { isWatched, toggleWatch } from '../store.js';
 import { openBuyModal } from '../ui/buy.js';
@@ -209,6 +209,7 @@ export function bindStock() {
 
 export async function renderStock() {
   const code = codeFromHash();
+  await ensureDividends([code]);   // 只拉这一只的分红
   const q = quote(code);
   if (!q) {
     return `<div class="page-head"><h1 class="page-title">个股</h1><div class="page-sub">${esc(code)} 没有行情（可能退市/停牌）</div></div>${searchBar()}`;
@@ -220,13 +221,8 @@ export async function renderStock() {
   let days = daily && daily.cal ? daily.cal.map((d, i) => (daily.c[i] == null ? null : [d, daily.c[i]])).filter(Boolean) : [];
   let chartSource = days.length ? '日 K' : '';
   if (!days.length) {
-    // 离线且没有本地日 K：用月线近似，保证图不白
-    try {
-      const months = await loadMonthly();
-      const rows = months[code] || [];
-      days = rows.map(([ym, close]) => [ym + '-28', close]);
-      chartSource = '月线（离线近似）';
-    } catch (e) { chartSource = ''; }
+    // 日 K 拉不到就明说，绝不再回退 6.2MB 月线——那会让任何一只没缓存的股票卡死两三分钟
+    chartSource = '日 K 暂时拉不到';
   }
   await extraPromise; // 个股页需要净利率/负债率/净利润（首屏不加载这部分）
   const v = verdict(code, q, d, pctData[code] ?? null);

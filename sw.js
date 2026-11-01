@@ -10,7 +10,7 @@
    首屏和离线外壳都不需要它，放进 SHELL 会让「装好、离线可用」多等约 40% 的下载。
    改由页面空闲时发 warm-charts 消息补缓存（见 WARM / warmAll），
    没补上也不影响在线画图——外壳的 fetch 处理器会把首次取到的文件顺手缓存。 */
-const SHELL_CACHE = 'hongli-shell-v1.1.2';
+const SHELL_CACHE = 'hongli-shell-v1.2.0';
 const DATA_CACHE = 'hongli-data-v1';
 /** 数据和代码分开放；数据量大又天天变，不该被代码改版连坐 */
 const cacheNameFor = (u) => (/\/data\//.test(u) || /\/vendor\//.test(u) ? DATA_CACHE : SHELL_CACHE);
@@ -26,6 +26,10 @@ const SHELL = [
   './data/quotes.json', './data/baseline.json', './data/benchmark.json',
   './data/finance-core.json', './data/dy-pct.json',
   './data/daily/meta.json',
+  // 本地已有的几只日 K（默认持仓/示例）：离线时个股页也能画图，其余股票在线按需拉
+  './data/daily/000333.json', './data/daily/600036.json', './data/daily/600066.json',
+  './data/daily/600887.json', './data/daily/600941.json', './data/daily/601318.json',
+  './data/daily/601398.json',
 ];
 
 /* 暖缓存：不阻塞安装/激活；页面空闲（或首次用到图表页）时再补 */

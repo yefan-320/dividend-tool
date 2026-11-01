@@ -2,7 +2,7 @@
  * 选股页：扫描榜 / 条件选股 / 多股对比 / 自选。
  * 数据全部来自本地 data/*.json；「分位」按需加载月线后计算。
  */
-import { db, loadDailyMany, loadDyPct, nameOf } from '../data.js';
+import { db, loadDailyMany, loadDyPct, nameOf, loadPool } from '../data.js';
 import { evaluate } from '../engine/verdict.js';
 import { drawMultiLineChart } from '../charts.js';
 import { loadWatch, toggleWatch, loadTxs } from '../store.js';
@@ -124,8 +124,30 @@ function viewTabs() {
 
 function searchBar() {
   return `<div class="stock-search-wrap">
-    <div class="stock-search">${icon('search')}<input id="scanSearch" placeholder="输入 6 位代码，跳到个股页" autocomplete="off" spellcheck="false"><kbd>Enter</kbd></div>
+    <div class="stock-search">${icon('search')}<input id="scanSearch" placeholder="代码或名称，如 600036 / 招商银行 / 格力" autocomplete="off" spellcheck="false"><kbd>Enter</kbd></div>
+    <div id="scanSuggest" class="search-suggest" hidden></div>
   </div>`;
+}
+
+/** 代码 / 中文名 / 拼音首字母 都能搜（名称来自全市场股票池，5552 只） */
+function searchMatches(kw, limit = 8) {
+  const k = String(kw || '').trim();
+  if (!k) return [];
+  const kl = k.toLowerCase();
+  const out = [];
+  for (const [code, info] of Object.entries(db.baseline.pool || {})) {
+    const n = (info && info.n) || '';
+    if (!n) continue;
+    const hitCode = code.startsWith(k);
+    const hitName = n.includes(k);
+    const hitPy = /^[a-z]+$/.test(kl) && (info.py ? String(info.py).startsWith(kl) : false);
+    if (hitCode || hitName || hitPy) {
+      out.push({ code, name: n, rank: hitCode ? 0 : hitName ? 1 : 2 });
+      if (out.length >= 60) break;
+    }
+  }
+  out.sort((a, b) => a.rank - b.rank || a.code.localeCompare(b.code));
+  return out.slice(0, limit);
 }
 
 function levelPill(level) {
@@ -363,7 +385,9 @@ function readUrlView() {
   if (cmp) scanState.cmp = cmp.split(',').filter((c) => /^\d{6}$/.test(c)).slice(0, MAX_CMP);
 }
 
-export function renderScanPage() {
+export async function renderScanPage() {
+  // 选股要全市场池
+  await loadPool();
   readUrlView();
   const body = scanState.view === 'cond' ? condView()
     : scanState.view === 'cmp' ? cmpView()
@@ -389,10 +413,44 @@ export async function bindScan() {
   if (!root) return;
 
   const search = document.getElementById('scanSearch');
+  const sug = document.getElementById('scanSuggest');
   if (search) {
-    search.onkeydown = (e) => {
-      if (e.key === 'Enter' && /^\d{6}$/.test(search.value.trim())) location.hash = 'stock?code=' + search.value.trim();
+    let list = [];
+    let active = -1;
+    const paint = () => {
+      if (!sug) return;
+      if (!list.length) { sug.hidden = true; sug.innerHTML = ''; return; }
+      sug.hidden = false;
+      sug.innerHTML = list.map((r, i) => `<div class="sg-item ${i === active ? 'on' : ''}" data-code="${r.code}"><b>${r.name}</b><span>${r.code}</span></div>`).join('');
     };
+    const go = (code) => { if (/^\d{6}$/.test(code)) location.hash = 'stock?code=' + code; };
+    search.oninput = () => {
+      const v = search.value.trim();
+      list = /^\d{6}$/.test(v) ? [{ code: v, name: '跳到该代码' }] : searchMatches(v);
+      active = list.length ? 0 : -1;
+      paint();
+    };
+    search.onkeydown = (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!list.length) return;
+        e.preventDefault();
+        active = (active + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length;
+        paint();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const pick = list[active] || list[0];
+        if (pick) go(pick.code);
+      } else if (e.key === 'Escape') {
+        list = []; active = -1; paint();
+      }
+    };
+    if (sug) {
+      sug.onmousedown = (e) => {
+        const it = e.target.closest('[data-code]');
+        if (it) { e.preventDefault(); go(it.dataset.code); }
+      };
+    }
+    search.onblur = () => setTimeout(() => { list = []; active = -1; paint(); }, 120);
   }
   document.querySelectorAll('[data-view]').forEach((b) => {
     b.onclick = () => { scanState.view = b.dataset.view; syncHashView(); rerender(); };

@@ -15,7 +15,7 @@ export const db = {
   ready: false,
   quotes: {},       // {code:{n,p,prev,o,hi,lo,date}}
   quoteRev: 0,      // 行情变更计数：页面级缓存用它判断是否需要重建（盯盘刷新后不显示旧价）
-  baseline: null,   // {pool, dividends, f10, holdings}
+  baseline: { pool: {}, dividends: {}, f10: {}, holdings: [] },  // 按需填充：见 loadPool / ensureDividends
   benchmark: {},    // {ym: value}
   monthly: null,    // {code:[[ym,close]]}
   finance: null,    // {code:[eps,roe,nm,liab,ocfps,np]} 最近年报
@@ -61,16 +61,15 @@ function hydrateFinance(data) {
 export async function loadCore() {
   if (db.ready) return db;
   performance.mark?.('d3-core-start');
-  const [quotes, baseline, benchmark, finance] = await Promise.all([
+  const [quotes, benchmark, finance] = await Promise.all([
     getJson('quotes.json'),
-    getJson('baseline.json'),
     getJson('benchmark.json'),
     // 首屏只要 eps/roe/ocfps（质量闸门），净利润/净利率/负债率由个股页按需加载
     getJson('finance-core.json').catch(() => getJson('finance-current.json').catch(() => ({ year: null, data: {} }))),
   ]);
   db.quotes = quotes.quotes || {};
   db.generated = quotes.generated || '';
-  db.baseline = baseline;
+  // baseline 不再整包加载：分红改成一只一个文件，按当前持仓/自选按需拉
   db.benchmark = benchmark.bench || {};
   db.finance = hydrateFinance(finance.data);
   db.finYear = finance.year || null;
@@ -388,4 +387,57 @@ export function dataMeta() {
     finCount: Object.keys(db.finance || {}).length || Object.keys(db.baseline?.f10 || {}).length,
     monthlyCount: db.monthly ? Object.keys(db.monthly).length : 0,
   };
+}
+
+/* ---------------- 分红 / 股票池：一只一个文件，按当前持仓动态拉 ---------------- */
+
+/** 已经拉过分红的股票（组合增删后只补新出现的，不重复下） */
+const divDone = new Set();
+let poolPromise = null;
+
+/**
+ * 全市场股票池（代码 → 名称/行业/市值）。只有今天页和选股页需要遍历全市场。
+ * 返回 {pool, f10, holdings}；回测页/个股页不要调这个。
+ */
+export async function loadPool() {
+  if (db.baseline.poolReady) return db.baseline;
+  if (!poolPromise) {
+    poolPromise = (async () => {
+      const [pool, base] = await Promise.all([
+        getJson('pool.json', { timeout: 30000 }).catch(() => ({})),
+        getJson('baseline.json', { timeout: 45000 }).catch(() => null),
+      ]);
+      db.baseline.pool = pool || {};
+      if (base) {
+        db.baseline.f10 = base.f10 || {};
+        db.baseline.holdings = base.holdings || [];
+        // 今天页要全市场算股息率，全量分红还是要的；但只给这两个页面用
+        if (base.dividends) Object.assign(db.baseline.dividends, base.dividends);
+      }
+      db.baseline.poolReady = true;
+      return db.baseline;
+    })();
+  }
+  return poolPromise;
+}
+
+/**
+ * 按需拉分红：把当前持仓（或自选、或单只个股）的历年分红只拉这几只。
+ *
+ * 组合是会增删改的——所以这里每次按传入的 codes 算差集：
+ * 已经拉过的跳过，新加的股票才发请求。用户改完组合再进回测，只会补下新增那几只。
+ */
+export async function ensureDividends(codes) {
+  if (db.baseline.poolReady) return db.baseline.dividends;   // 已经全量拉过就不用再补
+  const todo = [...new Set((codes || []).map(String))].filter((c) => /^\d{6}$/.test(c) && !divDone.has(c));
+  for (let i = 0; i < todo.length; i += 8) {
+    await Promise.all(todo.slice(i, i + 8).map(async (c) => {
+      try {
+        const j = await getJson(`div/${c}.json`, { timeout: 12000 });
+        if (j && j.years) db.baseline.dividends[c] = { years: j.years };
+        divDone.add(c);
+      } catch (e) { /* 没有分红记录：页面按「无」处理 */ }
+    }));
+  }
+  return db.baseline.dividends;
 }

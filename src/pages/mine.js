@@ -1,5 +1,5 @@
 import { portfolioStats } from '../engine/portfolio.js';
-import { db, quote, currentDy, divSummary, dataMeta } from '../data.js';
+import { db, quote, currentDy, divSummary, dataMeta, ensureDividends } from '../data.js';
 import {
   loadTxs, loadCash, saveCash, loadSettings, saveSettings,
 } from '../store.js';
@@ -223,10 +223,12 @@ function syncMineUrl() {
   try { history.replaceState(null, '', '#mine' + (mineState.view && mineState.view !== 'account' ? '?view=' + mineState.view : '')); } catch (e) {}
 }
 
-export function renderMine() {
+export async function renderMine() {
   readMineUrl();
   mineState.view = mineState.view || 'account';
   const txs = loadTxs();
+  // 只拉当前持仓那几只的分红（组合改了之后这里会自动补新增的）
+  await ensureDividends(txs.map((t) => t.code));
   const cash = loadCash();
   const r = portfolioStats(txs, db.quotes, db.baseline?.dividends || {}, today());
   const body = mineState.view === 'plans' ? plansView()

@@ -31,6 +31,7 @@ export function runStockBacktest(o) {
   const {
     code, dates, series, dividends = {}, finHistory = {},
     capital = 1000000, monthlyAdd = 0, minDy = 5, benchmarkSeries = null, from, to,
+    useQuality = true,   // false = 只看走势，不拿财报做质量筛选（也就不需要下财报）
   } = o;
   const px = (date) => priceAt(series, date);
   const nav = [];
@@ -104,7 +105,8 @@ export function runStockBacktest(o) {
     if (isAprEnd || isDecEnd) {
       const price = px(date);
       const dq = dyQuality({ dividends, finHistory, code, year: y, price });
-      const q = qualityOf(finHistory, code, y - 1);
+      // 不启用质量筛选时，财报一律视为「未知但不否决」：只按股息率/分红变化做决策
+      const q = useQuality ? qualityOf(finHistory, code, y - 1) : { ok: true, why: '' };
       const prev = prevDps(dividends, code, y - 1);
       const curDps = prevDps(dividends, code, y);
       const cut = prev > 0 && curDps > 0 && curDps < prev * 0.95;
@@ -120,8 +122,8 @@ export function runStockBacktest(o) {
         }
       }
       if (shares === 0 && q.ok && dq.dy != null && dq.dy >= minDy) {
-        const payoutBad = dq.payout != null && dq.payout >= 85;
-        const coverBad = dq.cover != null && dq.cover < 0.7;
+        const payoutBad = useQuality && dq.payout != null && dq.payout >= 85;
+        const coverBad = useQuality && dq.cover != null && dq.cover < 0.7;
         if (!payoutBad && !coverBad) {
           const n = Math.floor(cash / price / 100) * 100;
           if (n > 0) {

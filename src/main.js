@@ -19,6 +19,9 @@ const PAGES = [
   { id: 'mine', label: '我的', icon: 'user', render: renderMine, bind: bindMine },
 ];
 
+/** 版本号：发版时跟 sw.js 的 SHELL_CACHE、package.json 一起升 */
+const APP_VERSION = '1.2.0';
+
 const app = document.getElementById('app');
 const sidebar = document.getElementById('sidebar');
 const tabbar = document.getElementById('tabbar');
@@ -28,13 +31,24 @@ function currentId() {
   return PAGES.some((p) => p.id === id) ? id : 'today';
 }
 
+/** 构建时间：拿 index.html 的 Last-Modified，就是这次部署的时间 */
+function buildTime() {
+  try {
+    const d = new Date(document.lastModified);
+    if (!Number.isFinite(d.getTime())) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return ` · ${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  } catch (e) { return ''; }
+}
+
 function sidebarFooter() {
   const m = db;
   return `<div class="sidebar-foot">
     <div class="side-status"><span class="dot"></span> 按需联网 · 本地缓存</div>
     <div>行情 <b>${m.generated || '—'}</b><span class="quote-status" id="quoteStatus"></span></div>
-    <div>财报 <b>${Object.keys(m.finance || {}).length || 5377}</b> · 分红 <b>${Object.keys(m.baseline?.dividends || {}).length || 5406}</b></div>
-    <div>日 K 按需联网 · 月线 <b>2823</b></div>
+    <div>财报 <b>${Object.keys(m.finance || {}).length || 5377}</b> · 分红 <b>按需</b>（已载 ${Object.keys(m.baseline?.dividends || {}).length} 只）</div>
+    <div>日 K 按需联网 · 月线按需</div>
+    <div class="side-ver" id="sideVer">v${APP_VERSION}<span class="ver-time">${buildTime()}</span></div>
   </div>`;
 }
 
@@ -240,7 +254,18 @@ function warmChartsCache() {
 // PWA：注册 Service Worker（测试页面可用 ?nosw=1 跳过，避免缓存干扰）
 if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !/nosw=1/.test(location.search)) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+      // 有新版本装好了就告诉用户（否则他永远不知道页面是不是新的）
+      reg.addEventListener('updatefound', () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener('statechange', () => {
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+            toast(`新版本已就绪（v${APP_VERSION}），刷新页面即可用`);
+          }
+        });
+      });
+    }).catch(() => {});
   });
 }
 
