@@ -163,7 +163,7 @@ const pageMetrics = async () => JSON.parse(await evalJs(`(() => {
 const PAGES = [
   ['#today', '今天'],
   ['#scan', '选股'],
-  ['#stock?code=600036', '个股'],
+  ['#stock?code=600036', '招商银行'],
   ['#backtest', '回测'],
   ['#mine', '我的组合'],
 ];

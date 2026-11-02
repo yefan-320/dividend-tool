@@ -241,10 +241,11 @@ export async function renderStock() {
     { value: dps / 0.05, label: '5.0% 股息率' },
   ] : [];
   const realChart = `${chartPanel(code, days, chartSource)}`;
+  // 标题就是当前这只股票，不是「个股」——「个股」这两个字在 tab 上已经写了一遍
   return `<div class="page-head fade-in">
     <div>
-      <h1 class="page-title">个股</h1>
-      <div class="page-sub">真实行情 ${esc(db.generated)} · 分红历史 · 财报 ${v.hasFin ? '已导入' : '缺失'}</div>
+      <h1 class="page-title">${esc(nameOf(code))}</h1>
+      <div class="page-sub">${esc(code)}</div>
     </div>
     <div class="page-actions">
       <button class="btn ghost ${isWatched(code) ? 'is-on' : ''}" id="addWatch">${isWatched(code) ? '★ 已自选' : '☆ 自选'}</button>

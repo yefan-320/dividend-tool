@@ -117,7 +117,7 @@ async function main() {
   };
 
   // ---------- 1. 五个页面 ----------
-  for (const [hash, title] of [['#today', '今天'], ['#scan', '选股'], ['#stock?code=600036', '个股'], ['#backtest', '回测'], ['#mine', '我的组合']]) {
+  for (const [hash, title] of [['#today', '今天'], ['#scan', '选股'], ['#stock?code=600036', '招商银行'], ['#backtest', '回测'], ['#mine', '我的组合']]) {
     await scenario('页面 ' + title, async () => {
       const ms = await nav(hash);
       const t = await evalJs("(document.querySelector('.page-title')||{}).textContent");
@@ -315,7 +315,7 @@ async function main() {
 
   // ---------- 7. 移动端 ----------
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-  for (const [hash, title] of [['#today', '今天'], ['#scan', '选股'], ['#stock?code=600036', '个股'], ['#backtest', '回测'], ['#mine', '我的组合']]) {
+  for (const [hash, title] of [['#today', '今天'], ['#scan', '选股'], ['#stock?code=600036', '招商银行'], ['#backtest', '回测'], ['#mine', '我的组合']]) {
     await scenario('移动端 ' + title, async () => {
       await nav(hash);
       let t = '';

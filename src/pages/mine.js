@@ -55,8 +55,8 @@ function lotTable(r) {
       <td class="num">${num(x.shares, 0)}</td>
       <td class="num">${num(x.price, 2)}</td>
       <td class="num em">${num(x.nowPrice, 2)}</td>
-      <td class="num">${num(x.marketValue, 0)}</td>
-      <td class="num">${x.divCash > 0 ? num(x.divCash, 0) : '—'}</td>
+      <td class="num">${wan(x.marketValue, 1)} 万</td>
+      <td class="num">${x.divCash > 0 ? wan(x.divCash, 2) + ' 万' : '—'}</td>
       <td class="num ${upDown(x.pnl)}">${signedMoney(x.pnl)}<div class="ret-bar"><i class="${ret >= 0 ? 'pos' : 'neg'}" style="width:${w}%"></i></div></td>
       <td class="num ${upDown(ret)}">${pctSign(ret, 1)}</td>
       <td class="num ${upDown(x.annualized)}">${pctSign(x.annualized == null ? null : x.annualized * 100, 1)}</td>
