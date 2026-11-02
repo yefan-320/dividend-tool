@@ -108,7 +108,7 @@ try {
   const offlineScenes = [
     ['today', '#today', 5000, (st) => st.title === '今天' && !!st.counts && st.appLen > 500],
     ['scan', '#scan', 7000, (st) => st.title === '选股' && st.rows > 0],
-    ['stock', '#stock?code=600036', 7000, (st) => st.title === '个股' && st.canvas >= 1],
+    ['stock', '#stock?code=600036', 7000, (st) => st.title === '招商银行' && st.canvas >= 1],
   ];
   for (const [name, hash, wait, verify] of offlineScenes) {
     await send('Page.navigate', { url: SITE + '?theme=dark&t=' + Date.now() + hash });
