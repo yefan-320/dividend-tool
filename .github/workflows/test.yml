@@ -21,23 +21,63 @@ jobs:
         run: node tools/audit-app.mjs
       - name: 首屏性能预算（数据/JS gzip 体积、懒加载结构）
         run: node tools/check-budget.mjs
+
+      # 浏览器检查：每一步单独打 ::group:: / ::error::。
+      # 日志只有仓库管理员能下载，::error:: 会变成 check run 的 annotation，
+      # 谁都能通过 /check-runs/<id>/annotations 读到——失败原因不再是黑箱。
       - name: 浏览器冒烟与端到端检查（本地静态服务 + 无头 Chrome）
         run: |
           mkdir -p ../report/design
           python3 -m http.server 8766 --bind 127.0.0.1 >/tmp/http.log 2>&1 &
-          sleep 1
+          sleep 2
+          if ! curl -s --max-time 5 http://127.0.0.1:8766/index.html >/dev/null; then
+            echo "::error::静态服务 8766 没起来"
+            tail -20 /tmp/http.log
+            exit 1
+          fi
+
           CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)
           echo "chrome=$CHROME"
+          if [ -z "$CHROME" ]; then
+            echo "::error::runner 上找不到 chrome/chromium"
+            exit 1
+          fi
           "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --disable-crash-reporter --remote-debugging-port=9222 --user-data-dir=/tmp/d3-chrome about:blank >/tmp/chrome.log 2>&1 &
-          for i in $(seq 1 30); do curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null && break; sleep 1; done
-          node tools/smoke-all.mjs
-          node tools/check-render-budget.mjs
-          node tools/check-xss.mjs
-          node tools/check-pwa.mjs
-          node tools/check-plan-flow.mjs
-          node tools/check-backtest-modes.mjs
-          node tools/check-ui-state.mjs
-          node tools/check-ios.mjs
-          node tools/check-offline.mjs
+
+          up=0
+          for i in $(seq 1 40); do
+            if curl -s --max-time 2 http://127.0.0.1:9222/json/version >/dev/null; then up=1; break; fi
+            sleep 1
+          done
+          if [ "$up" != 1 ]; then
+            echo "::error::Chrome 调试口 9222 没起来 :: $(tail -6 /tmp/chrome.log | tr '\n' '|' | head -c 700)"
+            exit 1
+          fi
+          echo "chrome 版本：$(curl -s --max-time 5 http://127.0.0.1:9222/json/version | head -c 200)"
+
+          # 跑一个检查；失败就把它的输出尾巴塞进 annotation，别让原因留在拿不到的日志里
+          run() {
+            local name="$1"
+            echo "::group::$name"
+            if node "tools/$name.mjs" > /tmp/step.log 2>&1; then
+              tail -4 /tmp/step.log
+              echo "::endgroup::"
+              return 0
+            fi
+            tail -40 /tmp/step.log
+            echo "::error::$name 失败 :: $(grep -vE '^\s*$' /tmp/step.log | tail -10 | tr '\n' '|' | head -c 900)"
+            echo "::endgroup::"
+            return 1
+          }
+
+          run smoke-all
+          run check-render-budget
+          run check-xss
+          run check-pwa
+          run check-plan-flow
+          run check-backtest-modes
+          run check-ui-state
+          run check-ios
+          run check-offline
           # 放最后：它会清空站点数据（模拟全新安装），前面那些检查的状态不必留着
-          node tools/check-offline-boot.mjs
+          run check-offline-boot
