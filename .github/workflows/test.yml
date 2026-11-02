@@ -28,7 +28,7 @@ jobs:
       - name: 浏览器冒烟与端到端检查（本地静态服务 + 无头 Chrome）
         run: |
           mkdir -p ../report/design
-          python3 -m http.server 8766 --bind 127.0.0.1 >/tmp/http.log 2>&1 &
+          node tools/serve-static.mjs . 8766 >/tmp/http.log 2>&1 &
           sleep 2
           if ! curl -s --max-time 5 http://127.0.0.1:8766/index.html >/dev/null; then
             echo "::error::静态服务 8766 没起来"
