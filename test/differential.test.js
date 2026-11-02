@@ -164,6 +164,7 @@ function refPlanBacktest({ baseline, months, params = {}, finHistory = null }) {
   const periods = [];
   const trades = [];
   let current = null;
+  let navOwned = 1;
   let totalTurnover = 0;
 
   for (let i = 0; i < monthList.length; i++) {
@@ -178,38 +179,47 @@ function refPlanBacktest({ baseline, months, params = {}, finHistory = null }) {
       if (current) {
         const oldW = new Map(current.items.map((x) => [x.code, x.weight]));
         const newW = new Map(items.map((x) => [x.code, x.weight]));
+        // 换手率按「调仓后要买到的目标权重」和「调仓前实际权重」比。持有到底之后，
+        // 调仓前的实际权重 = 份额 × 最新价 ÷ 组合净值，不再等于建仓时的 1/N。
+        const oldEff = new Map();
+        for (const x of current.items) {
+          const px = x.lastPx || x.price;
+          oldEff.set(x.code, navOwned > 0 ? (x.shares * px) / navOwned : 0);
+        }
         let turnover = 0;
-        for (const [code, w] of oldW) turnover += Math.max(0, w - (newW.get(code) || 0));
-        for (const [code, w] of newW) turnover += Math.max(0, w - (oldW.get(code) || 0));
+        for (const [code, w] of oldEff) turnover += Math.max(0, w - (newW.get(code) || 0));
+        for (const [code, w] of newW) turnover += Math.max(0, w - (oldEff.get(code) || 0));
         turnover /= 2;
         totalTurnover += turnover;
         nav *= 1 - turnover * p.cost * 2;
-        trades.push({ ym, turnover, sold: current.items.filter((x) => !newW.has(x.code)).map((x) => x.code), bought: items.filter((x) => !oldW.has(x.code)).map((x) => x.code) });
+        trades.push({ ym, turnover, sold: current.items.filter((x) => !newW.has(x.code)).map((x) => x.code), bought: items.filter((x) => !oldEff.has(x.code)).map((x) => x.code) });
       } else {
         nav *= 1 - p.cost;
         totalTurnover += 1;
       }
+      // 买入后一路持有：份额固定，只有分红再投会让份额增加
+      for (const it of items) it.shares = (it.weight * nav) / it.price;
+      navOwned = nav;
       current = { ym, year: y, items };
       periods.push({ ym, items: items.map((x) => ({ code: x.code, name: x.name, dy: x.dy })) });
     }
 
-    // 该月收益：上月末 → 本月末（4 月调仓后，4 月收益按新持仓 × 3→4 月价格变动）
+    // 月净值：每只的份额 × 月末价；上一年度 DPS 均摊 12 个月再投入
     if (current && i > 0) {
-      const prevYm = monthList[i - 1];
-      let ret = 0;
-      let hit = 0;
-      let wsum = 0;
+      let v = 0;
+      let live = 0;
       for (const item of current.items) {
-        const p0 = priceOf(item.code, prevYm);
+        if (!(item.shares > 0)) continue;
         const p1 = priceOf(item.code, ym);
-        if (!p0 || !p1) continue;
-        hit++;
-        wsum += item.weight;
+        const px = p1 || item.lastPx || item.price;
+        if (!(px > 0)) continue;
+        live += item.shares * px;
         const dps = prevDpsRef(baseline.dividends, item.code, current.year);
-        ret += item.weight * (p1 / p0 - 1 + (dps > 0 ? dps / p0 / 12 : 0));
+        if (p1 && dps > 0) item.shares += ((item.shares * dps) / 12) / p1;
+        item.lastPx = px;
+        v += item.shares * px;
       }
-      if (hit > 0 && wsum > 0 && wsum < 0.999) ret /= wsum;
-      nav *= 1 + ret;
+      if (live > 0) nav = v;
     }
 
     navSeries.push({ ym, nav });

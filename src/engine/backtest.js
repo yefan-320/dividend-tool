@@ -88,7 +88,10 @@ export function selectCandidates({ baseline, prices, ym, year, params, finHistor
     if (consecutiveDivYears(dividends, code, year) < (params.minDivYears ?? 3)) continue;
     const dy = (dps / price) * 100;
     if (dy < (params.minDy ?? 4)) continue;
-    if (dy > 15) continue; // 异常股息率不选
+    // 股息率上限：不是「越高越好」。研究见 tools/research/README.md 发现二：
+    // 5%–6.5% 是最甜的一段，8% 以上多半是市场在说「这次分红不可持续」。
+    // 不设这个上限时，2024 年这一期会被 10%+ 的煤炭/地产吸进去，单年跑输 16 个百分点。
+    if (dy > (params.maxDy ?? 15)) continue;
     if (useQuality) {
       const rows = finHistory[code] || [];
       const fin = rows.find((r) => r[0] === year - 1);
@@ -96,14 +99,35 @@ export function selectCandidates({ baseline, prices, ym, year, params, finHistor
       const [, eps, roe, , , ocfps] = fin;
       if (!(eps > 0)) continue;
       const payout = (dps / eps) * 100;
-      if (payout >= 85) continue;
+      if (payout >= (params.maxPayout ?? 85)) continue;
+      if (payout < (params.minPayout ?? 0)) continue;
       const cover = ocfps / eps;
-      if (cover < 0.7) continue;
-      if (roe != null && roe < 5) continue;
+      if (cover < (params.minCover ?? 0.7)) continue;
+      if (roe != null && roe < (params.minRoe ?? 5)) continue;
     }
     out.push({ code, name: info.n, dy, price, dps });
   }
   out.sort((a, b) => b.dy - a.dy);
+  return out;
+}
+
+/**
+ * 按行业上限取前 n 只。
+ * 高股息股容易扎堆在同一个周期行业（2022—2024 年就是一水儿的煤炭钢铁），
+ * 单押一个行业的回撤会明显放大，所以这里限制同一行业最多取几只。
+ */
+export function pickWithIndCap(cand, holdN, indCap, pool = {}) {
+  if (!indCap || indCap <= 0) return cand.slice(0, holdN);
+  const byInd = new Map();
+  const out = [];
+  for (const x of cand) {
+    const ind = pool[x.code]?.ind || '其他';
+    const n = byInd.get(ind) || 0;
+    if (n >= indCap) continue;
+    byInd.set(ind, n + 1);
+    out.push(x);
+    if (out.length >= holdN) break;
+  }
   return out;
 }
 
@@ -155,6 +179,7 @@ export function runPlanBacktest({ baseline, months, screenMonths = null, benchma
   const trades = [];
   let current = null; // {ym, items:[{code, weight, dps, price}], year}
   let prevNav = 1;
+  let navOwned = 1;
   let totalTurnover = 0;
 
   for (let i = 0; i < monthList.length; i++) {
@@ -165,12 +190,12 @@ export function runPlanBacktest({ baseline, months, screenMonths = null, benchma
     // 调仓：每年 4 月
     if (m === 4 && y >= p.startYear) {
       const cand = selectCandidates({ baseline, prices, ym, year: y, params: p, finHistory });
-      const picked = cand.slice(0, p.holdN);
+      const picked = pickWithIndCap(cand, p.holdN, p.indCap ?? 0, baseline.pool);
       const ws = weightsFor(picked, p.weight);
       const items = picked.map((x, j) => ({ code: x.code, name: x.name, weight: ws[j], dy: x.dy, dps: x.dps, price: x.price }));
 
       if (current) {
-        const oldMap = new Map(current.items.map((x) => [x.code, x.weight]));
+        const oldMap = new Map(current.items.map((x) => [x.code, navOwned > 0 ? (x.shares * (x.lastPx || x.price)) / navOwned : 0]));
         const newMap = new Map(items.map((x) => [x.code, x.weight]));
         let turnover = 0;
         for (const [c, w] of oldMap) turnover += Math.max(0, w - (newMap.get(c) || 0));
@@ -183,32 +208,33 @@ export function runPlanBacktest({ baseline, months, screenMonths = null, benchma
         nav *= 1 - p.cost; // 建仓
         totalTurnover += 1;
       }
+      // 按份数买入，之后一路持有到底——不做月度再平衡。
+      // 以前这里是「每月把权重摊回等权」，等于隐含每月调仓一次：2021/2023/2025 这种
+      // 分化年份会系统性跑输真实持有 10 个百分点以上，跑赢跑输都能翻向。
+      for (const it of items) it.shares = (it.weight * nav) / it.price;
+      navOwned = nav;
       current = { ym, year: y, items };
       periods.push({ ym, items: items.map((x) => ({ code: x.code, name: x.name, dy: x.dy })) });
     }
 
-    // 月收益：价格变动 + 分红均摊
+    // 月净值：份额 × 月末价；分红按上一年度均摊到 12 个月再投入
     if (current && i > 0) {
       const prevYm = monthList[i - 1];
-      let ret = 0;
-      let hit = 0;
+      let v = 0;
+      let live = 0;
       for (const it of current.items) {
-        const p0 = priceAt(fullPrices, it.code, prevYm);
+        if (!(it.shares > 0)) continue;
         const p1 = priceAt(fullPrices, it.code, ym);
-        if (!p0 || !p1) continue;
-        hit++;
-        const priceRet = p1 / p0 - 1;
+        const px = p1 || it.lastPx || it.price;
+        if (!(px > 0)) continue;
+        live += it.shares * px;
         const dps = dpsPrevYear(baseline.dividends, it.code, current.year);
-        const divRet = dps > 0 ? dps / p0 / 12 : 0;
-        ret += it.weight * (priceRet + divRet);
+        if (p1 && dps > 0) it.shares += (it.shares * dps) / 12 / p1;
+        it.lastPx = px;
+        v += it.shares * px;
       }
-      // 有成分股停牌/缺数据时，按命中权重归一，避免凭空损失
-      if (hit > 0) {
-        const wsum = current.items.reduce((s, it) => s + (priceAt(fullPrices, it.code, ym) && priceAt(fullPrices, it.code, prevYm) ? it.weight : 0), 0);
-        if (wsum > 0 && wsum < 0.999) ret = ret / wsum;
-      }
-      prevNav = nav;
-      nav *= 1 + ret;
+      // 全部成分股都停牌/缺数据时不更新净值，避免凭空归零
+      if (live > 0) { prevNav = nav; nav = v; }
     }
 
     navSeries.push({ ym, nav });

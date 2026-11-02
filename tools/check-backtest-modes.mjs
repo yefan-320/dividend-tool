@@ -11,7 +11,7 @@
  *  2. 切「持仓回放」：起点市值 = 现金 + Σ 当前股数 × 起点价（独立公式），
  *     期末/年化/回撤与 replay 引擎一致；
  *  3. 改本金 50 万后重跑：指标卡跟着变，且仍与引擎一致；
- *  4. 组合对比：6 行（当前持仓 + 2 方案 + 红利策略 + 两条指数），
+ *  4. 组合对比：6 行（当前持仓 + 2 方案 + 红利精选 + 两条指数），
  *     方案行的期末/年化/回撤/分红与引擎逐项一致，且带图；
  *  5. 方案 >5 个时策略/指数行不会被 slice 挤掉（回归：rows.slice(0,8)）；
  *  6. 空账本（演示持仓）下不崩、不出 NaN / Infinity / undefined；
@@ -326,8 +326,8 @@ check('中证红利全收益行：期末/年化/回撤一致', !!benchRow && nor
 const lowVolRow = rowByName(cmp.rows, '红利低波全收益');
 check('红利低波全收益行：期末/年化/回撤一致', !!lowVolRow && norm(lowVolRow[1]) === expected.lowVol50.end && norm(lowVolRow[2]) === expected.lowVol50.cagr && norm(lowVolRow[3]) === expected.lowVol50.mdd,
   lowVolRow ? `页面 ${lowVolRow[1]} | ${lowVolRow[2]} | ${lowVolRow[3]} / 期望 ${expected.lowVol50.end} | ${expected.lowVol50.cagr} | ${expected.lowVol50.mdd}` : '缺行');
-const ruleRow = rowByName(cmp.rows, '红利策略');
-check('红利策略行存在且数值有效', !!ruleRow && norm(ruleRow[1]) !== '—' && !/NaN|Infinity|undefined/.test(norm(ruleRow[1])), ruleRow ? norm(ruleRow[1]) : '缺行');
+const ruleRow = rowByName(cmp.rows, '红利精选');
+check('红利精选行存在且数值有效', !!ruleRow && norm(ruleRow[1]) !== '—' && !/NaN|Infinity|undefined/.test(norm(ruleRow[1])), ruleRow ? norm(ruleRow[1]) : '缺行');
 
 /* ---------- 5. 方案很多时基准行不能被挤掉 ---------- */
 await seed(LEDGER, CASH, MANY_PLANS);
@@ -337,7 +337,7 @@ await evalJs(`document.querySelector('[data-btmode="cmp"]').click()`);
 await waitFor(`!!document.querySelector('#cmpChart')`, '多方案对比页渲染');
 cmp = await readCompare();
 const names = cmp.rows.map((r) => norm(r[0]));
-check('7 个方案时对比表仍保留策略/两条指数行', names.some((n) => n.includes('红利策略')) && names.some((n) => n.includes('中证红利全收益')) && names.some((n) => n.includes('红利低波全收益')),
+check('7 个方案时对比表仍保留策略/两条指数行', names.some((n) => n.includes('红利精选')) && names.some((n) => n.includes('中证红利全收益')) && names.some((n) => n.includes('红利低波全收益')),
   `行：${names.join(' / ')}`);
 check('7 个方案时最多 8 行（方案 5 个 + 策略/指数 3 行）', cmp.rows.length === 8, `实际 ${cmp.rows.length} 行`);
 

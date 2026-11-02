@@ -537,6 +537,73 @@ function stockCards(r, structureData, market) {
   return cards.join('');
 }
 
+
+/** 回撤体检：跌了多少、跌的时候分红补了多少、多久爬回来。
+ *
+ * 研究（tools/research/README.md）里最反直觉的一条：红利策略抗跌不是因为跌得少，
+ * 是因为跌的时候还在发钱——2018 年指数跌 21.5%，同期分红率 5.7%，相当于把坑填掉四分之一。
+ * 只给一个「最大回撤 −24%」看不出来这件事，所以单独拆一块。 */
+function ddPanel(r, s, structureData, totalDiv) {
+  const navs = r.nav || [];
+  if (navs.length < 3 || !s.mddPeak || !s.mddTrough) return '';
+  const peakDate = s.mddPeak, troughDate = s.mddTrough;
+  const peakV = navs.find(([d]) => d === peakDate)?.[1] || 0;
+  const days = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
+  const ddDiv = (r.events || [])
+    .filter((e) => e.type === '分红' && e.date >= peakDate && e.date <= troughDate)
+    .reduce((a, e) => a + (e.amount || 0), 0);
+  const fill = peakV > 0 && s.mdd < 0 ? (ddDiv / peakV / Math.abs(s.mdd)) * 100 : null;
+  // 修复：跌到底之后第一次回到前高
+  const ti = navs.findIndex(([d]) => d === troughDate);
+  let recoverDate = null;
+  for (let i = ti; i >= 0 && i < navs.length; i++) {
+    if (navs[i][1] >= peakV) { recoverDate = navs[i][0]; break; }
+  }
+  const stillUnder = !recoverDate;
+  const downDays = days(peakDate, troughDate);
+  const upDays = recoverDate ? days(troughDate, recoverDate) : days(troughDate, navs.at(-1)[0]);
+  const holdings = (structureData.holdings || []).length;
+  const benchMdd = s.benchMdd;
+
+  const cells = [
+    { k: '最大回撤', v: pct(s.mdd * 100, 1), cls: 'ddc', s: `${esc(peakDate)} → ${esc(troughDate)}` },
+    { k: '下跌用时', v: `${downDays} 天`, s: `${num(downDays / 30.4, 1)} 个月见底` },
+    { k: stillUnder ? '还在水下' : '爬回前高', v: stillUnder ? '未修复' : `${upDays} 天`, cls: stillUnder ? 'down' : 'up', s: stillUnder ? `距高点 ${num(upDays / 30.4, 1)} 个月` : `${num(upDays / 30.4, 1)} 个月修复` },
+    { k: '跌时收到的分红', v: bigMoney(ddDiv), cls: 'gold', s: fill == null ? '—' : `填掉回撤的 ${fill.toFixed(0)}%` },
+  ];
+
+  let verdict = '';
+  const downMonths = Math.max(1, Math.round(downDays / 30.4));
+  if (fill != null && fill > 5) {
+    verdict = `这一轮跌了 ${downMonths} 个月，期间分红到账 <b class="num gold">${bigMoney(ddDiv)}</b>，相当于把 ${Math.abs(s.mdd * 100).toFixed(1)}% 的坑填掉 <b>${fill.toFixed(0)}%</b>。红利策略抗跌的真处在这儿：股价在跌，现金还在进来。`;
+  } else if (fill != null) {
+    verdict = `这一轮跌了 ${downMonths} 个月，期间只碰到 ${bigMoney(ddDiv)} 分红，几乎没帮上忙——红利股一年也就发一两次钱，短期急跌指望分红补是不现实的。`;
+  }
+  if (benchMdd != null && s.mdd < 0) {
+    const better = s.mdd - benchMdd;
+    verdict += better > 0
+      ? ` 同期中证红利全收益回撤 ${pct(benchMdd * 100, 1)}，组合少跌 <b class="num up">${(better * 100).toFixed(1)}pp</b>。`
+      : ` 同期中证红利全收益回撤 ${pct(benchMdd * 100, 1)}，组合多跌 <b class="num down">${(-better * 100).toFixed(1)}pp</b>——这轮的分散做得不够。`;
+  }
+
+  // 集中度：研究里 1 只 −51.7%、3 只 −40.0%、15 只 −24.1%，回撤几乎由持仓数决定
+  const concWarn = holdings > 0 && holdings < 5
+    ? `<div class="dd-warn">${icon('alert')}<div>现在只有 <b>${holdings}</b> 只股票。研究样本里同样一套选股规则：持 1 只回撤 −51.7%、3 只 −40.0%、15 只 −24.1%——<b>回撤由分散度决定，不由选股决定</b>。加到 5 只以上再谈回测数字。</div></div>`
+    : '';
+
+  return `
+  <section class="panel fade-in" style="margin-top:14px">
+    <div class="panel-head"><span class="panel-title">回撤体检</span><span class="section-note">跌了多少 · 分红补了多少 · 多久爬回来</span></div>
+    <div class="panel-body" style="padding:10px">
+      ${concWarn}
+      <div class="bt-mini-stats dd-stats">
+        ${cells.map((c) => `<div><div class="k">${c.k}</div><div class="v num ${c.cls || ''}">${c.v}</div><div class="dk">${c.s}</div></div>`).join('')}
+      </div>
+      ${verdict ? `<div class="dd-note">${verdict}</div>` : ''}
+    </div>
+  </section>`;
+}
+
 function renderPort(market, structureData) {
   const { dates, series } = market;
   const displayPlan = !structureData.plan && !structureData.fallback;
@@ -617,6 +684,7 @@ function renderPort(market, structureData) {
   ${(r.builds && r.builds.length) || (r.pending && r.pending.length) ? `<div class="bt-buildnote">${(r.builds || []).map((b) => `<div>🏗 <b>${esc(nameOf(b.code))}</b> ${esc(b.date)} 建仓 ${num(b.shares, 0)} 股 @ ${num(b.price, 2)}（初始份额 × 期间组合增长；建仓前份额摊给已上市持仓）</div>`).join('')}${(r.pending || []).map((p) => `<div>⏳ <b>${esc(nameOf(p.code))}</b> 期末仍未建仓：${esc(p.reason)}${p.weight ? '（目标 ' + num(p.weight, 1) + '%）' : ''}</div>`).join('')}</div>` : ''}
   ${metricGrid(cards)}
   <div id="metricDetail" style="margin-top:12px"></div>
+  ${ddPanel(r, s, structureData, totalDiv)}
   ${displayPlan ? `<div class="row" style="gap:8px;margin-top:10px;align-items:center"><button class="btn sm ghost" id="btSavePlan">把当前结构存为方案</button><span class="bt-hint">存的是「代码 + 目标权重」，可切回对比</span></div>` : ''}
 
   <section class="panel fade-in" style="margin-top:14px">
@@ -890,6 +958,49 @@ function divSectionStock(r) {
 
 /* ---------------- 组合对比 ---------------- */
 
+
+/** 红利精选的最新一期成分：模型现在到底选了什么，抄给人看。
+ *
+ * 光有一行净值曲线看不出这套规则选股选在哪，所以把最近一次调仓的成分、行业分布、
+ * 平均股息率摆出来——用户能对着自己的持仓判断这事靠不靠谱。 */
+function strategyPanel() {
+  const st = ctx?.cmpStrategy;
+  if (!st || !st.periods || !st.periods.length) return '';
+  const last = st.periods[st.periods.length - 1];
+  const items = last.items || [];
+  if (!items.length) return '';
+  const pool = db.baseline.pool || {};
+  const avgDy = items.reduce((a, x) => a + (Number(x.dy) || 0), 0) / items.length;
+  const inds = new Map();
+  for (const x of items) {
+    const g = pool[x.code]?.ind || '其他';
+    if (!inds.has(g)) inds.set(g, []);
+    inds.get(g).push(x);
+  }
+  const maxInd = [...inds.entries()].sort((a, b) => b[1].length - a[1].length)[0];
+  const chips = [...inds.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([g, list]) => `
+      <div class="st-ind">
+        <div class="st-ind-head">${esc(g)}<span>${list.length}</span></div>
+        <div class="st-ind-body">${list.map((x) => `<span class="st-chip" data-code="${esc(x.code)}" title="${esc(x.name)} 股息率 ${(Number(x.dy) || 0).toFixed(1)}%">${esc(x.name)}<i>${(Number(x.dy) || 0).toFixed(1)}%</i></span>`).join('')}</div>
+      </div>`).join('');
+
+  return `
+  <section class="panel fade-in" style="margin-top:14px">
+    <div class="panel-head"><span class="panel-title">红利精选 · 最新一期成分</span><span class="section-note">${esc(last.ym)} 调仓 · ${items.length} 只等权</span></div>
+    <div class="panel-body" style="padding:12px 14px 14px">
+      <div class="st-meta">
+        <div><span class="k">平均股息率</span><b class="num gold">${avgDy.toFixed(1)}%</b></div>
+        <div><span class="k">覆盖行业</span><b class="num">${inds.size}</b></div>
+        <div><span class="k">最大行业</span><b class="num">${esc(maxInd ? maxInd[0] : '—')}</b><span class="d">${maxInd ? maxInd[1].length + ' 只' : ''}</span></div>
+      </div>
+      <div class="st-inds">${chips}</div>
+      <div class="bt-hint" style="margin-top:10px">规则：连续分红 ≥5 年 · 派息率 10%–80% · 股息率 4%–8% · 经营现金流覆盖 ≥0.7 · 同行业最多 3 只。股息率上限不是越高越好——8% 以上多半是市场在说这次分红撑不住。</div>
+    </div>
+  </section>`;
+}
+
 function renderCompare(market, structureData) {
   const from = clampFrom(btState.from);
   const to = btState.to;
@@ -919,7 +1030,7 @@ function renderCompare(market, structureData) {
     <div class="panel-head"><span class="panel-title">组合对比</span><span class="section-note">同一本金 ${bigMoney(btState.capital)} · 同一区间 · 同一口径</span></div>
     <div class="panel-body" style="padding:10px 10px 4px">
       <div id="cmpChart" class="chart" style="height:380px"></div>
-      <div class="bt-hint" style="padding:4px">每个方案按自己的目标权重复投；红利策略为每年 4 月按股息率选前 20 只等权调仓（分红按上一年度合计均摊 12 个月）；指数为全收益口径；曲线为月末净值</div>
+      <div class="bt-hint" style="padding:4px">每个方案按自己的目标权重复投；红利精选为每年 4 月末按规则选 15 只等权买入、持有一年不中途再平衡（分红按上一年度合计均摊 12 个月再投）；指数为全收益口径；曲线为月末净值</div>
     </div>
   </section>
   <section class="panel fade-in" style="margin-top:14px">
@@ -929,6 +1040,7 @@ function renderCompare(market, structureData) {
       <tbody>${table}</tbody>
     </table></div>
   </section>
+  ${strategyPanel()}
   <section class="panel fade-in" style="margin-top:14px">
     <div class="panel-head"><span class="panel-title">结论</span></div>
     <div class="panel-body" style="font-size:12.5px;line-height:1.8;color:var(--text-2)">
@@ -1049,10 +1161,15 @@ export async function renderBacktest() {
     // 红利策略：选股用「每年 4 月末收盘价」（cmp-yearly，78KB）跑一遍，
     // 拿到 10 年选中的成分股，再只拉这几十只的完整月线（每只 2.3KB）算净值。
     // 这样净值/回撤是月频精确的，而不用下 6.4MB 全市场月线。
+    // 高稳定分红模型（研究见 tools/research/README.md）：
+    // 连续分红 5 年 + 派息率 10–80% + 股息率 4–8% + 同行业最多 3 只 + 持 15 只。
+    // 8% 上限砍掉「异常高息」那一段——不设它，2024 年会全仓煤炭地产，单年跑输 16 个点。
     const strategyParams = {
       startYear: Number(clampFrom(btState.from).slice(0, 4)) + 1,
       endYm: btState.to.slice(0, 7),
-      holdN: 20, minDy: 4, minDivYears: 3, quality: true,
+      holdN: 15, minDy: 4, maxDy: 8, minDivYears: 5,
+      minPayout: 10, maxPayout: 80, minRoe: 8, minCover: 0.7,
+      indCap: 3, quality: true,
     };
     const screenMonths = await loadCmpScreen();
     const cmpFin = await loadCmpFin();
@@ -1069,7 +1186,7 @@ export async function renderBacktest() {
     const noPick = !pass1.periods.length || pass1.periods.every((x) => !x.items.length);
     rows.push({
       kind: 'rule',
-      name: `红利策略(${plan.params.holdN}只)`, color: chartColors().sub,
+      name: `红利精选(${plan.params.holdN}只)`, color: chartColors().sub,
       nav: plan.nav.map((pt) => [monthEnd(pt.ym), +(btState.capital * pt.nav).toFixed(2)]),
       end: btState.capital * (1 + plan.stats.total), cagr: plan.stats.cagr, mdd: plan.stats.mdd, div: null, width: 1.6,
       empty: noPick,
@@ -1082,6 +1199,7 @@ export async function renderBacktest() {
     ctx.compareRows = [...planRows.slice(0, 5), ...restRows].slice(0, 8);
     ctx.compareBench = b0.bench;
     ctx.compareLowVol = b0.lowVol;
+    ctx.cmpStrategy = { periods: plan.periods, params: plan.params, yearly: plan.yearly, stats: plan.stats };
     ctx.compareNote = noPick
       ? '红利策略这一行没选出任何股票（股票池或选股财报没加载成功），所以是一条水平线，不代表策略本身不赚钱。'
       : '';

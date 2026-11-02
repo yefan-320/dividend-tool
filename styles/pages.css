@@ -293,6 +293,31 @@
 .bt-mini-stats > div { background: var(--surface); padding: 10px 12px; }
 .bt-mini-stats .k { font-size: 10px; color: var(--text-3); }
 .bt-mini-stats .v { margin-top: 3px; font-size: 17px; font-weight: 700; }
+/* 回撤体检：数字下面带一行解释，别再让人只看到一个百分比 */
+.dd-stats .dk { margin-top: 3px; font-size: 10px; line-height: 1.4; color: var(--text-3); }
+.dd-note { margin-top: 10px; font-size: 12px; line-height: 1.7; color: var(--text-2); padding: 11px 13px; border-radius: var(--r); background: var(--surface-2); border-left: 2px solid var(--accent); }
+.dd-note b { color: var(--text); }
+.dd-warn { display: flex; gap: 9px; align-items: flex-start; font-size: 11.5px; line-height: 1.65; color: var(--text-2); background: color-mix(in srgb, var(--warn) 9%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 26%, transparent); border-radius: var(--r); padding: 10px 12px; margin-bottom: 10px; }
+.dd-warn svg { flex: 0 0 auto; margin-top: 1px; color: var(--warn); }
+.dd-warn b { color: var(--text); }
+
+/* 红利精选成分：按行业分组，一眼看出有没有押在同一个周期上 */
+.st-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.st-meta > div { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; }
+.st-meta .k { display: block; font-size: 10px; color: var(--text-3); margin-bottom: 3px; }
+.st-meta b { font-size: 16px; font-weight: 700; letter-spacing: -.3px; }
+.st-meta .d { margin-left: 5px; font-size: 10.5px; color: var(--text-3); }
+.st-inds { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.st-ind { border: 1px solid var(--line); border-radius: var(--r); padding: 9px 11px 10px; background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
+.st-ind-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10.5px; color: var(--text-3); margin-bottom: 7px; }
+.st-ind-head span { font-variant-numeric: tabular-nums; color: var(--text-3); }
+.st-ind-body { display: flex; flex-wrap: wrap; gap: 5px; }
+.st-chip { display: inline-flex; align-items: baseline; gap: 5px; font-size: 11.5px; line-height: 1; padding: 4px 7px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); color: var(--text-2); }
+.st-chip i { font-style: normal; font-size: 10px; color: var(--accent); font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  .st-meta { grid-template-columns: 1fr 1fr; }
+  .st-inds { grid-template-columns: 1fr; }
+}
 .fold { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); margin-top: 14px; overflow: hidden; }
 .fold > summary { list-style: none; cursor: pointer; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .fold > summary::-webkit-details-marker { display: none; }
