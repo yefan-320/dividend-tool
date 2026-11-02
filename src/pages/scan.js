@@ -17,7 +17,7 @@ const MAX_CMP = 4;
 
 export const scanState = {
   view: 'scan',                 // scan | cond | cmp | watch
-  sort: { key: 'dy', dir: -1 },
+  sort: { key: 'level', dir: 1 },   // 结论优先：可买在最上面，不用翻过一堆被规则剔掉的怪股
   cmp: [],                      // 对比选中的代码
   filters: { minDy: 4, minConsec: 3, minPct: 0, minCap: 0, maxPayout: 100, minRoe: 0, qualityOnly: false },
   showST: false, showAbnormal: false,
@@ -169,19 +169,6 @@ function table(rows, { showPct = true } = {}) {
   </table></div>`;
 }
 
-function statCards(u) {
-  const counts = { buy: 0, wait: 0, avoid: 0, missing: 0 };
-  for (const r of u) counts[r.level] = (counts[r.level] || 0) + 1;
-  const avgDy = u.reduce((s, r) => s + r.dy, 0) / Math.max(1, u.length);
-  const cells = [
-    ['可买', counts.buy || 0, 'up', '质量 + 股息率达标'],
-    ['观察', counts.wait || 0, 'warn', '接近门槛'],
-    ['回避', counts.avoid || 0, 'down', '亏损/支付率/现金流'],
-    ['平均股息率', avgDy.toFixed(2) + '%', 'gold', '有分红记录的全市场'],
-  ];
-  return `<div class="scan-stats">${cells.map(([k, v, c, s]) => `<div class="scan-stat"><div class="k">${k}</div><div class="v num ${c}">${v}</div><div class="s">${s}</div></div>`).join('')}</div>`;
-}
-
 function baseUniverse() {
   const all = buildUniverse();
   if (scanState.showST && scanState.showAbnormal) return all;
@@ -191,7 +178,10 @@ function baseUniverse() {
 function sortedUniverse() {
   const u = baseUniverse().slice();
   const { key, dir } = scanState.sort;
+  // 结论优先：同一档里再按股息率降序（rank 放大后减去 dy，升序排就是「好的在前、同档息高的在前」）
+  const RANK = { buy: 0, wait: 1, hold: 2, avoid: 3, missing: 4 };
   const val = (r) => {
+    if (key === 'level') return (RANK[r.level] ?? 9) * 10000 - r.dy;
     if (key === 'pct') return r.pct == null ? -1 : r.pct;
     if (key === 'cap') return r.cap || 0;
     if (key === 'payout') return r.payout == null ? 999 : r.payout;
@@ -203,22 +193,30 @@ function sortedUniverse() {
   return u;
 }
 
+/** 这两个开关一年改不了几次（默认排除 ST 和假高息本来就是对的），
+ *  摊在首屏要占 140px，等于拿两行股票的位置换两个几乎不碰的复选框。收起来。 */
 function toggleChips() {
-  return `<div class="chip-row" style="margin:0 0 12px">
-    <button class="chip ${scanState.showST ? 'on' : ''}" data-toggle="showST">${scanState.showST ? '☑' : '☐'} 含 ST / 退市</button>
-    <button class="chip ${scanState.showAbnormal ? 'on' : ''}" data-toggle="showAbnormal">${scanState.showAbnormal ? '☑' : '☐'} 含股息率 &gt;15% 异常</button>
-    <span class="section-note" style="align-self:center">默认剔除 ST 与异常高股息（一次性分红/股价大跌的假象）</span>
-  </div>`;
+  const off = !scanState.showST || !scanState.showAbnormal;
+  return `<details class="scan-more" style="margin:0 0 12px"${off ? '' : ' open'}>
+    <summary>筛选<span class="sm-note">默认排除 ST 与异常高股息（一次性分红 / 股价大跌的假象）</span></summary>
+    <div class="chip-row" style="margin:8px 0 12px">
+      <button class="chip ${scanState.showST ? 'on' : ''}" data-toggle="showST">${scanState.showST ? '☑' : '☐'} 含 ST / 退市</button>
+      <button class="chip ${scanState.showAbnormal ? 'on' : ''}" data-toggle="showAbnormal">${scanState.showAbnormal ? '☑' : '☐'} 含股息率 &gt;15% 异常</button>
+    </div>
+  </details>`;
 }
 
 function levelChips(u) {
   const counts = { buy: 0, wait: 0, avoid: 0, missing: 0 };
   for (const r of u) counts[r.level] = (counts[r.level] || 0) + 1;
-  const items = [['', '全部', u.length], ['buy', '可买', counts.buy], ['wait', '观察', counts.wait], ['avoid', '回避', counts.avoid], ['missing', '数据不足', counts.missing]];
-  return `<div class="chip-row" style="margin:8px 0 12px">${items.map(([id, label, n]) => `<button class="chip ${scanState.levelFilter === id ? 'on' : ''}" data-level="${id}">${label} <b class="num">${n}</b></button>`).join('')}</div>`;
+  // 「数据不足 0」这种 chip 占一整行不干别的事，0 就不显示
+  const items = [['', '全部', u.length], ['buy', '可买', counts.buy], ['wait', '观察', counts.wait], ['avoid', '回避', counts.avoid]]
+    .filter(([id, , n]) => id === '' || n > 0);
+  if (counts.missing > 0) items.push(['missing', '数据不足', counts.missing]);
+  return `<div class="chip-row" style="margin:8px 0 12px">${items.map(([id, label, n]) => `<button class="chip ${scanState.levelFilter === id ? 'on' : ''} ${id === 'buy' && n > 0 ? 'is-buy' : ''}" data-level="${id}">${label} <b class="num">${n}</b></button>`).join('')}</div>`;
 }
 
-const SORT_LABEL = { dy: '股息率', consec: '连续分红', pct: '分位', cap: '市值', payout: '支付率', score: '综合分' };
+const SORT_LABEL = { level: '结论优先', dy: '股息率', consec: '连续分红', pct: '分位', cap: '市值', payout: '支付率', score: '综合分' };
 
 function scanView() {
   const all = baseUniverse();
@@ -226,8 +224,7 @@ function scanView() {
   const list = (u === all ? sortedUniverse() : u.slice().sort((a, b) => b.dy - a.dy)).slice(0, 100);
   // 筛到 0 只时不要整页 return ''：那样连筛选按钮一起没了，用户只能刷新
   if (!list.length) {
-    return `${statCards(all)}
-  ${levelChips(all)}
+    return `${levelChips(all)}
   ${toggleChips()}
   <section class="panel fade-in">
     <div class="panel-head"><span class="panel-title">扫描榜</span><span class="section-note">当前筛选 0 只</span></div>
@@ -238,14 +235,13 @@ function scanView() {
   }
   const maxScore = Math.max(...list.map((x) => x.score || 0), 1);
   const sortKey = scanState.sort.key;
-  const sortDir = scanState.sort.dir > 0 ? '↑' : '↓';
-  return `${statCards(all)}
-  ${levelChips(all)}
+  // 「结论优先」是一个序，不是升降；给它配箭头只会让人问「↑ 是好还是坏」
+  const sortDir = sortKey === 'level' ? '' : (scanState.sort.dir > 0 ? '↑' : '↓');
+  return `${levelChips(all)}
   ${toggleChips()}
   <section class="panel fade-in">
     <div class="panel-head">
       <span class="panel-title">扫描榜</span>
-      <span class="section-note">全市场 ${u.length} 只有分红记录 · 前 100</span>
       <label class="scan-sort-inline">
         <span>排序</span>
         <select id="scanSort">${Object.entries(SORT_LABEL).map(([k, label]) => `<option value="${k}"${k === sortKey ? ' selected' : ''}>${label}${k === sortKey ? sortDir : ''}</option>`).join('')}</select>
@@ -387,9 +383,7 @@ export async function renderScanPage() {
   return `<div class="page-head fade-in">
     <div>
       <h1 class="page-title">选股</h1>
-      <div class="page-sub">全市场股息率扫描 · 条件筛选 · 多股对比 · 自选</div>
     </div>
-    <div class="page-actions"><span class="page-mark" aria-hidden="true">${icon('filter')}</span></div>
   </div>
   ${searchBar()}
   ${viewTabs()}

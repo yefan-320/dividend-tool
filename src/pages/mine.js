@@ -237,7 +237,7 @@ export async function renderMine() {
   return `<div class="page-head fade-in">
     <div>
       <h1 class="page-title">我的组合</h1>
-      <div class="page-sub">每笔买入独立算收益率 · 组合整体算 XIRR · 数据存本地</div>
+      <div class="page-sub">每笔独立算收益 · 组合算 XIRR</div>
     </div>
     <div class="page-actions">${mineState.view === 'account' ? '<button class="btn ghost" id="resetTxs">重置演示</button>' : ''}</div>
   </div>

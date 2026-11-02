@@ -544,8 +544,6 @@ body.modal-open { overflow: hidden; }
 }
 
 /* page-head 右侧的装饰性小图标（如选股页筛选标记）：限制尺寸，避免裸 svg 在窄屏被拉成 300px */
-.page-mark { display: inline-flex; align-items: center; color: var(--text-3); }
-.page-mark svg { width: 16px; height: 16px; }
 
 /* 扫描榜：手机端排序下拉（桌面用表头点击排序） */
 .scan-sort-inline { display: none; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); }

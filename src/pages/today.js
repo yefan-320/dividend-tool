@@ -67,9 +67,12 @@ function hero(cands, p) {
   }, 0);
   return `<section class="hero fade-in">
     <div class="hero-main">
-      <div class="hero-kicker">${dot()} 今天 可买 ${buy} · 观察 ${wait} · 回避 ${avoid} · 数据不足 ${missing}</div>
+      <div class="hero-kicker">${dot()} 今天 可买 ${buy} · 观察 ${wait} · 回避 ${avoid}${missing ? ' · 数据不足 ' + missing : ''}</div>
       <div class="hero-line">先看财报质量，再看股息率</div>
-      <div class="hero-desc">亏损、支付率 ≥80%、现金流覆盖不足、股息率 &gt;15% 的直接回避。股息率 &gt;8% 只算观察——8%–9% 那一档长期年化只有 7.0%，5%–6.5% 才是甜区。财务健康、股息率 5%–8%、连续分红 ≥5 年才给「可买」。</div>
+      <details class="hero-fold">
+        <summary>四条一票否决 · 5%–6.5% 是甜区 · 连续分红 ≥5 年才算可买</summary>
+        <p>亏损、支付率 ≥80%、现金流覆盖不足、股息率 &gt;15% 的直接回避。股息率 &gt;8% 只算观察——8%–9% 那一档长期年化只有 7.0%，5%–6.5% 才是甜区。财务健康、股息率 5%–8%、连续分红 ≥5 年才给「可买」。</p>
+      </details>
     </div>
     <div class="stats">
       <div class="stat"><div class="stat-label">总资产</div><div class="stat-value num">${moneyParts(total).v}<span style="font-size:13px;color:var(--text-2);font-weight:500"> ${moneyParts(total).u}</span></div><div class="stat-sub">现金 ${bigMoney(cash)}</div></div>
@@ -212,7 +215,7 @@ export async function renderToday() {
   return `<div class="page-head fade-in">
     <div>
       <h1 class="page-title">今天</h1>
-      <div class="page-sub">${esc(db.generated || '2026-10-30')} 收盘 <span class="dim">·</span> ${dot()} 真实行情 · 财报 ${dataMeta().finCount} 只 · ${dataAgeBadge()}</div>
+      <div class="page-sub">${esc(db.generated || '2026-10-30')} 收盘 <span class="dim">·</span> ${dot()} 真实行情 · 财报 ${dataMeta().finCount} 只</div>
     </div>
     <div class="page-actions">
       <button class="theme-toggle" id="themeBtn" title="切换深浅色">${icon('sun')}</button>

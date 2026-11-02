@@ -254,8 +254,10 @@
 
 /* ---------- 窄屏：页头/面板头改为纵向，避免标题被挤成竖排 ---------- */
 @media (max-width: 640px) {
-  .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
-  .page-actions { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+  /* 标题和右上角操作永远同一行：以前小屏把 actions 挤到下一行，太阳按钮孤零零掉在标题底下 */
+  .page-head { flex-direction: row; align-items: center; gap: 12px; }
+  .page-head > div:first-child { flex: 1; min-width: 0; }
+  .page-actions { width: auto; flex-wrap: nowrap; justify-content: flex-end; }
   .panel-head { flex-wrap: wrap; row-gap: 4px; padding: 12px 14px; }
   .panel-head .section-note { flex: 1 1 100%; }
 }
