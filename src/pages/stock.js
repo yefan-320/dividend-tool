@@ -8,7 +8,6 @@ import { icon } from '../ui/icons.js';
 import { esc, num, pctSign, levelPill, upDown, payoutText } from '../ui/format.js';
 import { mountStockSearch } from '../ui/stockSearch.js';
 
-const CHIPS = ['000333', '600036', '601318', '600887', '600941', '601398', '600066'];
 
 function codeFromHash() {
   const qs = (location.hash.split('?')[1] || '');
@@ -29,12 +28,6 @@ function searchBar() {
       <kbd>Enter</kbd>
     </div>
     <div id="stockSuggest" class="search-suggest" hidden></div>
-  </div>`;
-}
-
-function chips(active) {
-  return `<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:14px">
-    ${CHIPS.map((c) => `<button class="btn sm ${c === active ? 'primary' : 'ghost'}" data-code="${c}">${esc(nameOf(c))}</button>`).join('')}
   </div>`;
 }
 
@@ -216,6 +209,8 @@ export function bindStock() {
 
 export async function renderStock() {
   const code = codeFromHash();
+  // 记下最后看过的这只：回测页的个股模式默认用它（个股页不放跳转按钮，那只是复制导航）。
+  try { localStorage.setItem('d3:lastStock', code); } catch (e) { /* 隐私模式下忽略 */ }
   await ensureDividends([code]);   // 只拉这一只的分红
   const q = quote(code);
   if (!q) {
@@ -252,7 +247,6 @@ export async function renderStock() {
     </div>
   </div>
   ${searchBar()}
-  ${chips(code)}
   ${verdictPanel(code, q, d, v)}
   <div class="split" style="margin-top:14px">
     ${factorsPanel(code, q, d, v)}

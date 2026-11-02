@@ -39,7 +39,7 @@ export const btState = {
   to: null,
   capital: 1000000,
   monthlyAdd: 0,
-  stock: '600036',      // 默认招商银行：打开就能看到一套真实跑起来的回测
+  stock: '600036',      // 每次渲染时由 readBtUrl() 换成 d3:lastStock
   minDy: 5,
   quality: false,         // 个股回测质量筛选：默认关（只看走势，不拉财报）
   metric: 'nav',
@@ -1183,6 +1183,13 @@ function readBtUrl() {
   if (['port', 'stock', 'cmp'].includes(mode)) btState.mode = mode;
   const code = qs.get('code');
   if (/^\d{6}$/.test(code || '')) btState.stock = code;
+  else {
+    // hash 没带 code：用最后在个股页看过的那只，省掉「手打 6 位代码」这一步
+    try {
+      const last = localStorage.getItem('d3:lastStock');
+      if (/^\d{6}$/.test(last || '')) btState.stock = last;
+    } catch (e) { /* 隐私模式下忽略 */ }
+  }
   const plan = qs.get('plan');
   if (plan) {
     btState.planId = plan;
