@@ -578,9 +578,10 @@ function ddPanel(r, s, structureData, totalDiv) {
   const holdings = (structureData.holdings || []).length;
   const benchMdd = s.benchMdd;
 
-  // 集中度：研究里 1 只 −51.7%、3 只 −40.0%、15 只 −24.1%，回撤几乎由持仓数决定
+  // 集中度：同一套选股规则，持 1 只 −51.7% / 3 只 −40.0% / 5 只 −24.3% / 8 只 −24.1% / 15 只 −24.1%
+  // 5 只是拐点：过了它，剩下的回撤是大盘给的，再分散也不会更抗跌
   const concWarn = holdings > 0 && holdings < 5
-    ? `<div class="dd-warn">${icon('alert')}<div>现在只有 <b>${holdings}</b> 只股票。研究样本里同样一套选股规则：持 1 只回撤 −51.7%、3 只 −40.0%、15 只 −24.1——<b>回撤由分散度决定，不由选股决定</b>。加到 5 只以上再谈回测数字。</div></div>`
+    ? `<div class="dd-warn">${icon('alert')}<div>现在只有 <b>${holdings}</b> 只股票。同样一套选股规则：持 1 只回撤 −51.7%、3 只 −40.0%、<b>5 只就已经降到 −24.3%</b>（8 只 −24.1%、15 只 −24.1）——5 只是拐点，过了它剩下的回撤归大盘管，不归你选股管。</div></div>`
     : '';
 
   // 分红填坑进度条：0–100%，超过 40% 就算「这轮跌得值」
@@ -606,7 +607,7 @@ function ddPanel(r, s, structureData, totalDiv) {
     const better = s.mdd - benchMdd;
     verdict += better > 0
       ? ` 同期中证红利全收益回撤 ${pct(benchMdd * 100, 1)}，组合少跌 <b class="num up">${(better * 100).toFixed(1)}pp</b>。`
-      : ` 同期中证红利全收益回撤 ${pct(benchMdd * 100, 1)}，组合多跌 <b class="num down">${(-better * 100).toFixed(1)}pp</b>——这轮分散做得不够。`;
+      : ` 同期中证红利全收益回撤 ${pct(benchMdd * 100, 1)}，组合多跌 <b class="num down">${(-better * 100).toFixed(1)}pp</b>——这轮持仓没吃到红利那股抗跌的劲。`;
   }
   const cashNote = s.mddCash != null && Math.abs(s.mddCash - s.mdd) > 0.005
     ? `回撤按剥离追加后的净值算（含追加会虚低到 ${pct(s.mddCash * 100, 1)}）`
@@ -627,7 +628,7 @@ function ddPanel(r, s, structureData, totalDiv) {
         <div class="dd-bar"><i style="width:${barW.toFixed(1)}%"></i></div>
         <div class="dd-fs">期间到账 <b class="num divc">${bigMoney(ddDiv)}</b>，全拿去再投</div>
       </div>
-      ${rows ? `<div class="dd-list"><div class="dd-lh">历史上跌超 15% 的一共 ${deeper.length} 次，另外 ${others.length} 次</div>${rows}</div>` : ''}
+      ${rows ? `<div class="dd-list"><div class="dd-lh">历史上跌超 15% 的一共 ${deeper.length} 次</div>${rows}</div>` : ''}
       ${verdict ? `<div class="dd-note">${verdict}</div>` : ''}
     </div>
   </section>`;
@@ -677,7 +678,7 @@ function stockDdPanel(r, st, name) {
         <div class="dd-bar"><i style="width:${barW.toFixed(1)}%"></i></div>
         <div class="dd-fs">期间到账 <b class="num divc">${bigMoney(worst.divReal || 0)}</b>，按除息日当天买回</div>
       </div>
-      ${rows ? `<div class="dd-list"><div class="dd-lh">历史上跌超 15% 的一共 ${deeper.length} 次，另外 ${others.length} 次</div>${rows}</div>` : ''}
+      ${rows ? `<div class="dd-list"><div class="dd-lh">历史上跌超 15% 的一共 ${deeper.length} 次</div>${rows}</div>` : ''}
       <div class="dd-note">${verdict}</div>
     </div>
   </section>`;
