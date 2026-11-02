@@ -47,7 +47,7 @@ function sidebarFooter() {
     <div class="side-status"><span class="dot"></span> 按需联网 · 本地缓存</div>
     <div>行情 <b>${m.generated || '—'}</b><span class="quote-status" id="quoteStatus"></span></div>
     <div>财报 <b>${Object.keys(m.finance || {}).length || 5377}</b> · 分红 <b>按需</b>（已载 ${Object.keys(m.baseline?.dividends || {}).length} 只）</div>
-    <div>日 K 按需联网 · 月线按需</div>
+    <div>日 K 按需联网 · 月线走分片</div>
     <div class="side-ver" id="sideVer">v${APP_VERSION}<span class="ver-time">${buildTime()}</span></div>
   </div>`;
 }
@@ -135,6 +135,9 @@ async function renderPage() {
     clearTimeout(loadingTimer);
     disposeCharts();
     app.innerHTML = html;
+    // 页面加载完数据后侧栏数字才是真的（分红/财报只数在 loadPool 之后才知道），
+    // 重画一次，否则底部会一直写着「已载 0 只」
+    renderSidebar(page.id);
     try { applyTableLayout(app); } catch (e) { console.error('[表格布局]', e); }
   } catch (e) {
     clearTimeout(loadingTimer);
