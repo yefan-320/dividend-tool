@@ -3,16 +3,15 @@
  * 数据全部来自本地 data/*.json；「分位」按需加载月线后计算。
  */
 import { db, loadDailyMany, loadDyPct, nameOf, loadPool } from '../data.js';
-import { evaluate } from '../engine/verdict.js';
+import { evaluate, LEVEL as LV } from '../engine/verdict.js';
 import { drawMultiLineChart } from '../charts.js';
 import { loadWatch, toggleWatch, loadTxs } from '../store.js';
 import { openBuyModal } from '../ui/buy.js';
 import { toast } from '../ui/toast.js';
 import { icon } from '../ui/icons.js';
-import { esc, num, pctSign, upDown } from '../ui/format.js';
+import { esc, num, pctSign, upDown, payoutText, PAYOUT_CAP } from '../ui/format.js';
 import { mountStockSearch } from '../ui/stockSearch.js';
 
-const LV = { buy: '可买', wait: '观察', avoid: '回避', missing: '数据不足', hold: '持有' };
 const MAX_CMP = 4;
 
 export const scanState = {
@@ -82,6 +81,10 @@ function buildUniverse() {
   U_REV = db.quoteRev;
   return out;
 }
+
+/** 每个键的默认方向。「结论优先」是序不是升降（rank 小的在前），其它指标降序。
+ *  以前两处切换都写死 -1，切一次再切回「结论优先」首屏就全是「回避」。 */
+function sortDirOf(key) { return key === 'level' ? 1 : -1; }
 
 /** 扫描榜用的综合分：股息率 + 连续分红 + 质量，0–100 */
 function scoreOf(r) {
@@ -154,7 +157,7 @@ function table(rows, { showPct = true } = {}) {
     <td class="num">${r.consec} 年</td>
     <td class="num" ${showPct ? `data-pct="${r.code}"` : ''}>${r.pct == null ? '—' : r.pct + '%'}</td>
     <td class="num">${r.cap ? (r.cap / 1e8).toFixed(0) : '—'}</td>
-    <td class="num">${r.payout == null ? '—' : num(r.payout, 0) + '%'}</td>
+    <td class="num">${payoutText(r.payout)}</td>
     <td class="num">${r.cover == null ? '—' : num(r.cover, 2)}</td>
     <td>${levelPill(r.level)}</td>
     <td class="ops">${watchBtn(r.code)}<button class="btn ghost sm" data-buy="${r.code}">买入</button></td>
@@ -184,7 +187,8 @@ function sortedUniverse() {
     if (key === 'level') return (RANK[r.level] ?? 9) * 10000 - r.dy;
     if (key === 'pct') return r.pct == null ? -1 : r.pct;
     if (key === 'cap') return r.cap || 0;
-    if (key === 'payout') return r.payout == null ? 999 : r.payout;
+    // 异常支付率（分母坏了）不参与排序，否则「按支付率排」的第一名永远是几千 %
+    if (key === 'payout') return r.payout == null || r.payout > PAYOUT_CAP ? 999 : r.payout;
     if (key === 'consec') return r.consec;
     if (key === 'score') return r.score;
     return r.dy;
@@ -314,7 +318,7 @@ function cmpTable() {
       <tr><td>股息率</td>${rows.map((r) => `<td class="num gold">${num(r.dy, 2)}%</td>`).join('')}</tr>
       <tr><td>连续分红</td>${rows.map((r) => `<td class="num">${r.consec} 年</td>`).join('')}</tr>
       <tr><td>股息率分位</td>${rows.map((r) => `<td class="num" data-pct="${r.code}">${r.pct == null ? '—' : r.pct + '%'}</td>`).join('')}</tr>
-      <tr><td>支付率</td>${rows.map((r) => `<td class="num">${r.payout == null ? '—' : num(r.payout, 0) + '%'}</td>`).join('')}</tr>
+      <tr><td>支付率</td>${rows.map((r) => `<td class="num">${payoutText(r.payout)}</td>`).join('')}</tr>
       <tr><td>现金流覆盖</td>${rows.map((r) => `<td class="num">${r.cover == null ? '—' : num(r.cover, 2)}</td>`).join('')}</tr>
       <tr><td>ROE</td>${rows.map((r) => `<td class="num">${r.roe == null ? '—' : num(r.roe, 1) + '%'}</td>`).join('')}</tr>
       <tr><td>结论</td>${rows.map((r) => `<td>${levelPill(r.level)}</td>`).join('')}</tr>
@@ -416,15 +420,17 @@ export async function bindScan() {
   const sortSel = document.getElementById('scanSort');
   if (sortSel) {
     sortSel.onchange = () => {
-      scanState.sort = { key: sortSel.value, dir: -1 };
+      scanState.sort = { key: sortSel.value, dir: sortDirOf(sortSel.value) };
       rerender();
     };
   }
   document.querySelectorAll('[data-sort]').forEach((th) => {
     th.onclick = () => {
       const key = th.dataset.sort;
-      if (scanState.sort.key === key) scanState.sort.dir *= -1;
-      else scanState.sort = { key, dir: -1 };
+      // 点「结论」列不翻转方向：这个键只有一个合理的序，翻了就是「回避在前」
+      if (key === 'level') scanState.sort = { key, dir: 1 };
+      else if (scanState.sort.key === key) scanState.sort.dir *= -1;
+      else scanState.sort = { key, dir: sortDirOf(key) };
       rerender();
     };
   });

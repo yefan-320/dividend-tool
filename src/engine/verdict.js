@@ -10,7 +10,8 @@
  * 这是最小可用规则；P2 会加上估值分位、历史信号与置信度。
  */
 
-export const LEVEL = { buy: '可买', wait: '观察', avoid: '回避', missing: '数据不足' };
+/** 五个等级的显示名。三个页面以前各自抄了一份，改一处必漏两处——现在只有这一份。 */
+export const LEVEL = { buy: '可买', wait: '观察', avoid: '回避', missing: '数据不足', hold: '持有' };
 
 export function latestFin(f10, code) {
   const fin = f10?.[code];

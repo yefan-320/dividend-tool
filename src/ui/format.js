@@ -79,6 +79,16 @@ export function dot(color = 'ok') {
 
 export function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
+/** 支付率 = 分红 ÷ EPS。EPS 接近 0 会炸成几千 %（康美药业实测 3429%），那是分母坏了，
+ *  不是高分红：一律显示「异常」，排序也丢到最后。 */
+export const PAYOUT_CAP = 500;
+
+export function payoutText(v) {
+  if (v == null || !isFinite(v)) return '—';
+  if (v > PAYOUT_CAP) return '异常';
+  return num(v, 0) + '%';
+}
+
 export function shortDate(d) {
   if (!d) return '—';
   return String(d).replace(/-/g, '.').slice(0, 10);

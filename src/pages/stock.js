@@ -3,12 +3,11 @@ import { drawPriceChart } from '../charts.js';
 import { isWatched, toggleWatch } from '../store.js';
 import { openBuyModal } from '../ui/buy.js';
 import { toast } from '../ui/toast.js';
-import { evaluate } from '../engine/verdict.js';
+import { evaluate, LEVEL as LV } from '../engine/verdict.js';
 import { icon } from '../ui/icons.js';
-import { esc, num, pctSign, levelPill, upDown } from '../ui/format.js';
+import { esc, num, pctSign, levelPill, upDown, payoutText } from '../ui/format.js';
 import { mountStockSearch } from '../ui/stockSearch.js';
 
-const LV = { buy: '可买', wait: '观察', avoid: '回避', hold: '持有', missing: '数据不足' };
 const CHIPS = ['000333', '600036', '601318', '600887', '600941', '601398', '600066'];
 
 function codeFromHash() {
@@ -57,7 +56,7 @@ function verdictPanel(code, q, d, v) {
           <span class="tag">股息率 ${num(v.cur, 1)}%</span>
           <span class="tag">连续分红 ${d ? d.consecutive : 0} 年</span>
           <span class="tag">财报 ${v.hasFin ? '已导入' : '缺失'}</span>
-          ${ev.metrics.payout != null ? `<span class="tag" style="color:${ev.metrics.payout > 90 ? 'var(--warn)' : 'var(--text-2)'}">支付率 ${num(ev.metrics.payout, 0)}%</span>` : ''}
+          ${ev.metrics.payout != null ? `<span class="tag" style="color:${ev.metrics.payout > 90 ? 'var(--warn)' : 'var(--text-2)'}">支付率 ${payoutText(ev.metrics.payout)}</span>` : ''}
           ${ev.metrics.ocfCover != null ? `<span class="tag">现金流覆盖 ${num(ev.metrics.ocfCover, 2)}×</span>` : ''}
           ${v.pctile != null ? `<span class="tag" style="color:var(--accent-2);border-color:var(--accent-line)">股息率分位 ${num(v.pctile, 0)}%</span>` : ''}
         </div>
@@ -105,7 +104,7 @@ function factorsPanel(code, q, d, v) {
     { k: '分红可持续', v: d ? Math.min(10, (d.consecutive / 10) * 10) : null, note: d ? `连续 ${d.consecutive} 年 · 最近 ${d.lastY} 年每股 ${num(dps, 3)}` : '无分红记录' },
     { k: '盈利质量', v: fin?.roe != null ? Math.min(10, Math.max(0, fin.roe / 2.5)) : null, note: fin ? `ROE ${num(fin.roe, 1)}% · 净利率 ${num(fin.netMargin, 1)}% · 负债率 ${num(fin.liabilityRatio, 1)}%` : '缺财报，无法计算' },
     { k: '价格 / 估值', v: v.cur != null ? Math.min(10, Math.max(0, v.cur)) : null, note: `股息率 ${num(v.cur, 1)}% · 分位 ${v.pctile == null ? '—' : num(v.pctile, 0)}%` },
-    { k: '支付率', v: payout != null ? (payout >= 30 && payout <= 80 ? 8 : payout > 100 ? 2 : 5) : null, note: fin ? `分红 / EPS = ${num(payout, 0)}%（40–70% 为佳）` : '缺 EPS，无法计算' },
+    { k: '支付率', v: payout != null ? (payout >= 30 && payout <= 80 ? 8 : payout > 100 ? 2 : 5) : null, note: fin ? `分红 / EPS = ${payoutText(payout)}（40–70% 为佳）` : '缺 EPS，无法计算' },
   ];
   return `<section class="panel fade-in">
     <div class="panel-head"><span class="panel-title">四层因子</span><span class="section-note">0–10 · 财报缺失的项不填分</span></div>

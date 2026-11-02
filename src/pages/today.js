@@ -1,11 +1,10 @@
 import { portfolioStats } from '../engine/portfolio.js';
 import { db, quote, nameOf, divSummary, dataMeta, loadPool } from '../data.js';
-import { evaluate } from '../engine/verdict.js';
+import { evaluate, LEVEL as LV } from '../engine/verdict.js';
 import { loadTxs, loadCash } from '../store.js';
 import { icon } from '../ui/icons.js';
-import { esc, num, money, wan, moneyParts, bigMoney, pctSign, upDown, levelPill, dot } from '../ui/format.js';
+import { esc, num, money, wan, moneyParts, bigMoney, pctSign, upDown, levelPill, dot, payoutText } from '../ui/format.js';
 
-const LV = { buy: '可买', wait: '观察', avoid: '回避', hold: '持有', missing: '数据不足' };
 
 /** 全市场候选：股息率 ≥5%、连续分红 ≥5 年、非 ST；按决策等级分组，各组取前几只 */
 function candidates() {
@@ -90,7 +89,7 @@ function decisionRow(c) {
   const lv = c.level;
   return `<div class="decision-row" data-code="${c.code}" role="button" tabindex="0">
     <div class="grow">
-      <div class="decision-name"><b>${esc(c.name)}</b><span class="code">${c.code}</span>${levelPill(lv, LV[lv])}${!c.metrics.hasFin ? '<span class="tag">缺财报</span>' : ''}${c.metrics.payout != null && c.metrics.payout > 90 ? '<span class="tag" style="color:var(--warn)">支付率 ' + c.metrics.payout.toFixed(0) + '%</span>' : ''}</div>
+      <div class="decision-name"><b>${esc(c.name)}</b><span class="code">${c.code}</span>${levelPill(lv, LV[lv])}${!c.metrics.hasFin ? '<span class="tag">缺财报</span>' : ''}${c.metrics.payout != null && c.metrics.payout > 90 ? '<span class="tag" style="color:var(--warn)">支付率 ' + payoutText(c.metrics.payout) + '</span>' : ''}</div>
       <div class="decision-why">${esc(c.reasons[0])}</div>
     </div>
     <div class="decision-price">
