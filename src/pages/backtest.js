@@ -10,7 +10,7 @@ import {
   loadFinanceHistory, loadDailyMeta, loadDailyMany, loadIndexDaily,
   nameOf, quote, ensureDividends,
 } from '../data.js';
-import { buildSeries, buildTradingDates, monthEnd, priceAt, maxDrawdown, prevDps } from '../engine/market.js';
+import { buildSeries, buildTradingDates, monthEnd, priceAt, maxDrawdown, prevDps, ddReport } from '../engine/market.js';
 import { runPortfolioBacktest } from '../engine/portfolioBacktest.js';
 import { runStockBacktest, runInvestBacktest } from '../engine/stockBacktest.js';
 import { runPlanBacktest } from '../engine/backtest.js';
@@ -45,6 +45,7 @@ export const btState = {
   metric: 'nav',
   planId: 'current',
   cmpPlans: null,         // 组合对比里勾选的方案 id；null = 全选
+  paramOpen: false,       // 参数抽屉：默认收起，先给结果，别让表单占满一屏
 };
 
 let ctx = null;
@@ -237,7 +238,20 @@ function paramBar(opts = {}) {
     <button class="btn sm ${btState.portMode === 'invest' ? 'primary' : 'ghost'}" data-portmode="invest">投入回测</button>
     <button class="btn sm ${btState.portMode === 'replay' ? 'primary' : 'ghost'}" data-portmode="replay">持仓回放</button>
   </div>`;
+  const capW = Math.round(btState.capital / 10000);
+  const addTxt = btState.monthlyAdd > 0 ? `月追 ${btState.monthlyAdd / 1000}千` : '不追加';
+  const qTxt = activeQ ? `近 ${activeQ} 年` : `${from} → ${btState.to}`;
+  const planTxt = btState.mode === 'port' && btState.planId !== 'current'
+    ? ` · ${esc((loadPlans().find((p) => p.id === btState.planId) || {}).name || '方案')}` : '';
+  const sumTxt = `${qTxt} · ${capW} 万 · ${addTxt}${btState.mode === 'stock' ? ` · 质量${btState.quality ? '开' : '关'}` : ''}${planTxt}`;
   return `<section class="panel fade-in bt-params">
+    <div class="bt-bar">
+      <button class="bt-summary${btState.paramOpen ? ' on' : ''}" id="btFold" aria-expanded="${btState.paramOpen ? 'true' : 'false'}">
+        ${icon('filter')}<span>${sumTxt}</span><span class="bf-edit">${btState.paramOpen ? '收起' : '调整'}</span>
+      </button>
+      <button class="btn primary" id="btRun">${icon('play')} 运行回测</button>
+    </div>
+    <div class="bt-more" id="btMore"${btState.paramOpen ? '' : ' hidden'}>
     <div class="bt-param-row">
       <label class="bt-field"><span>开始</span><input class="input" type="date" id="btFrom" value="${from}" min="2012-01-01" max="${todayStr()}"></label>
       <label class="bt-field"><span>结束</span><input class="input" type="date" id="btTo" value="${btState.to}" min="2012-01-01" max="${todayStr()}"></label>
@@ -260,12 +274,13 @@ function paramBar(opts = {}) {
       <span class="bt-hint" style="margin-left:12px">月追加快捷</span>
       ${[0, 5000, 10000, 20000].map((v) => `<button class="bt-chip ${btState.monthlyAdd === v ? 'on' : ''}" data-add="${v}">${v === 0 ? '不追加' : v / 1000 + '千'}</button>`).join('')}
       ${tabs}
-      <button class="btn primary" id="btRun" style="margin-left:auto">${icon('play')} 运行回测</button>
     </div>
     ${btState.mode === 'cmp' ? cmpPlanPicker() : ''}
     <div class="bt-hint" style="margin-top:8px">${opts.stock
-      ? `日级净值 · 价格不复权 · 每月末定投 · 分红在除权除息日当天按收盘价再投 · 不判断买卖点 · 不含税`
-      : `日级净值 · 价格不复权 · 分红按真实除权除息日到账 · 未上市股票份额先摊给已上市、上市满 6 个月建仓 · 不含税 · 行情 <b>${esc(todayStr())}</b> · 日 K 自 ${esc(dailyStart())}（更早用月线）`}</div>
+      ? `价格不复权 · 每月末定投 · 分红在除权除息日当天按收盘价再投 · 不判断买卖点`
+      : `价格不复权 · 分红按真实除权除息日到账 · 未上市股票份额先摊给已上市、上市满 6 个月建仓 · 日 K 自 ${esc(dailyStart())}（更早用月线）`}</div>
+    </div>
+    <div class="bt-hint bt-footnote">日净值 · 不复权 · 分红按除息日到账 · 不含税 · 行情 ${esc(todayStr())}</div>
   </section>`;
 }
 
@@ -542,64 +557,128 @@ function stockCards(r, structureData, market) {
  *
  * 研究（tools/research/README.md）里最反直觉的一条：红利策略抗跌不是因为跌得少，
  * 是因为跌的时候还在发钱——2018 年指数跌 21.5%，同期分红率 5.7%，相当于把坑填掉四分之一。
- * 只给一个「最大回撤 −24%」看不出来这件事，所以单独拆一块。 */
+ * 只给一个「最大回撤 −24%」看不出来这件事，所以单独拆一块。
+ *
+ * 2026-11 重做：
+ *  - 数字全部走单位净值（engine 里 episodes / fill 都是 TWR 口径），把「月追加稀释回撤」堵死；
+ *  - 主数字只留一个（最大回撤），其余降级成注脚——四个格子等权等于没有重点；
+ *  - 补「历史深回撤」列表：跌几次、每次多久，这才是持有体验；
+ *  - 分红填坑改成一条进度条，别让人读句子算百分比。
+ */
 function ddPanel(r, s, structureData, totalDiv) {
-  const navs = r.nav || [];
-  if (navs.length < 3 || !s.mddPeak || !s.mddTrough) return '';
-  const peakDate = s.mddPeak, troughDate = s.mddTrough;
-  const peakV = navs.find(([d]) => d === peakDate)?.[1] || 0;
-  const days = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
-  const ddDiv = (r.events || [])
-    .filter((e) => e.type === '分红' && e.date >= peakDate && e.date <= troughDate)
-    .reduce((a, e) => a + (e.amount || 0), 0);
-  const fill = peakV > 0 && s.mdd < 0 ? (ddDiv / peakV / Math.abs(s.mdd)) * 100 : null;
-  // 修复：跌到底之后第一次回到前高
-  const ti = navs.findIndex(([d]) => d === troughDate);
-  let recoverDate = null;
-  for (let i = ti; i >= 0 && i < navs.length; i++) {
-    if (navs[i][1] >= peakV) { recoverDate = navs[i][0]; break; }
-  }
-  const stillUnder = !recoverDate;
-  const downDays = days(peakDate, troughDate);
-  const upDays = recoverDate ? days(troughDate, recoverDate) : days(troughDate, navs.at(-1)[0]);
+  const eps = (Array.isArray(r.episodes) ? r.episodes : []).slice().sort((a, b) => a.depth - b.depth);
+  if (!eps.length) return '';
+  const worst = eps[0];
+  const dp = (d) => `${d.slice(2, 4)}-${d.slice(5, 7)}`;
+  const upDays = worst.upDays;
+  const downDays = worst.downDays;
+  const fill = worst.fill;
+  const ddDiv = worst.divReal || 0;
+  const deeper = eps.filter((e) => e.depth <= -0.15);
   const holdings = (structureData.holdings || []).length;
   const benchMdd = s.benchMdd;
 
-  const cells = [
-    { k: '最大回撤', v: pct(s.mdd * 100, 1), cls: 'ddc', s: `${esc(peakDate)} → ${esc(troughDate)}` },
-    { k: '下跌用时', v: `${downDays} 天`, s: `${num(downDays / 30.4, 1)} 个月见底` },
-    { k: stillUnder ? '还在水下' : '爬回前高', v: stillUnder ? '未修复' : `${upDays} 天`, cls: stillUnder ? 'down' : 'up', s: stillUnder ? `距高点 ${num(upDays / 30.4, 1)} 个月` : `${num(upDays / 30.4, 1)} 个月修复` },
-    { k: '跌时收到的分红', v: bigMoney(ddDiv), cls: 'gold', s: fill == null ? '—' : `填掉回撤的 ${fill.toFixed(0)}%` },
-  ];
+  // 集中度：研究里 1 只 −51.7%、3 只 −40.0%、15 只 −24.1%，回撤几乎由持仓数决定
+  const concWarn = holdings > 0 && holdings < 5
+    ? `<div class="dd-warn">${icon('alert')}<div>现在只有 <b>${holdings}</b> 只股票。研究样本里同样一套选股规则：持 1 只回撤 −51.7%、3 只 −40.0%、15 只 −24.1——<b>回撤由分散度决定，不由选股决定</b>。加到 5 只以上再谈回测数字。</div></div>`
+    : '';
 
+  // 分红填坑进度条：0–100%，超过 40% 就算「这轮跌得值」
+  const barW = fill == null ? 0 : Math.max(1, Math.min(100, fill * 100));
+
+  // 列表只放「其它几次」——最惨那次已经是大数字，不重复
+  const others = deeper.slice(1, 5);
+  const rows = others.map((e) => `
+    <div class="dd-row">
+      <b class="num ddc">${pct(e.depth * 100, 1)}</b>
+      <span class="dd-when">${esc(dp(e.peak))} → ${esc(dp(e.trough))}</span>
+      <span class="dd-fix ${e.ongoing ? 'down' : ''}">${e.ongoing ? '还没爬回来' : `修复 ${num(e.upDays / 30.4, 1)} 个月`}</span>
+    </div>`).join('');
+
+  // 填坑率按档说话：13% 说成「真正抗跌」是自欺欺人
+  const fillPct = fill == null ? null : fill * 100;
   let verdict = '';
-  const downMonths = Math.max(1, Math.round(downDays / 30.4));
-  if (fill != null && fill > 5) {
-    verdict = `这一轮跌了 ${downMonths} 个月，期间分红到账 <b class="num gold">${bigMoney(ddDiv)}</b>，相当于把 ${Math.abs(s.mdd * 100).toFixed(1)}% 的坑填掉 <b>${fill.toFixed(0)}%</b>。红利真正抗跌的地方就在这儿：股价在跌，现金还在进来。`;
-  } else if (fill != null) {
-    verdict = `这一轮跌了 ${downMonths} 个月，期间只碰到 ${bigMoney(ddDiv)} 分红，几乎没帮上忙——红利股一年也就发一两次钱，短期急跌指望分红补是不现实的。`;
-  }
+  if (fillPct == null) verdict = '';
+  else if (fillPct >= 20) verdict = `跌的时候现金一直在进来——红利抗跌最大的底牌就是这个。`;
+  else if (fillPct >= 10) verdict = `分红只填掉 ${fillPct.toFixed(0)}%，不多。但这一跌快两年，钱一直在进账，等于逼你别在最低点割。`;
+  else verdict = `这一轮分红几乎没帮上忙——红利股一年也就发一两次钱，短期急跌指望分红补是不现实的，能救你的只有分散和仓位。`;
   if (benchMdd != null && s.mdd < 0) {
     const better = s.mdd - benchMdd;
     verdict += better > 0
       ? ` 同期中证红利全收益回撤 ${pct(benchMdd * 100, 1)}，组合少跌 <b class="num up">${(better * 100).toFixed(1)}pp</b>。`
-      : ` 同期中证红利全收益回撤 ${pct(benchMdd * 100, 1)}，组合多跌 <b class="num down">${(-better * 100).toFixed(1)}pp</b>——这轮的分散做得不够。`;
+      : ` 同期中证红利全收益回撤 ${pct(benchMdd * 100, 1)}，组合多跌 <b class="num down">${(-better * 100).toFixed(1)}pp</b>——这轮分散做得不够。`;
   }
-
-  // 集中度：研究里 1 只 −51.7%、3 只 −40.0%、15 只 −24.1%，回撤几乎由持仓数决定
-  const concWarn = holdings > 0 && holdings < 5
-    ? `<div class="dd-warn">${icon('alert')}<div>现在只有 <b>${holdings}</b> 只股票。研究样本里同样一套选股规则：持 1 只回撤 −51.7%、3 只 −40.0%、15 只 −24.1%——<b>回撤由分散度决定，不由选股决定</b>。加到 5 只以上再谈回测数字。</div></div>`
+  const cashNote = s.mddCash != null && Math.abs(s.mddCash - s.mdd) > 0.005
+    ? `回撤按剥离追加后的净值算（含追加会虚低到 ${pct(s.mddCash * 100, 1)}）`
     : '';
 
   return `
   <section class="panel fade-in" style="margin-top:14px">
-    <div class="panel-head"><span class="panel-title">回撤体检</span><span class="section-note">跌了多少 · 分红补了多少 · 多久爬回来</span></div>
-    <div class="panel-body" style="padding:10px">
+    <div class="panel-head"><span class="panel-title">回撤体检</span><span class="section-note">${cashNote || '跌了多少 · 分红补了多少 · 多久爬回来'}</span></div>
+    <div class="panel-body" style="padding:14px">
       ${concWarn}
-      <div class="bt-mini-stats dd-stats">
-        ${cells.map((c) => `<div><div class="k">${c.k}</div><div class="v num ${c.cls || ''}">${c.v}</div><div class="dk">${c.s}</div></div>`).join('')}
+      <div class="dd-hero">
+        <div class="dd-k">最深回撤</div>
+        <div class="dd-v num">${pct(worst.depth * 100, 1)}</div>
+        <div class="dd-s">${esc(worst.peak)} 见顶 → ${esc(worst.trough)} 见底 · 跌了 <b>${num(downDays / 30.4, 1)} 个月</b>${worst.ongoing ? '，<b class="down">现在还在水下</b>' : `，<b>${num(upDays / 30.4, 1)} 个月</b>才爬回前高`}</div>
       </div>
+      <div class="dd-fill">
+        <div class="dd-fh"><span>跌的时候分红填掉</span><b class="num gold">${fill == null ? '—' : (fill * 100).toFixed(0) + '%'}</b></div>
+        <div class="dd-bar"><i style="width:${barW.toFixed(1)}%"></i></div>
+        <div class="dd-fs">期间到账 <b class="num divc">${bigMoney(ddDiv)}</b>，全拿去再投</div>
+      </div>
+      ${rows ? `<div class="dd-list"><div class="dd-lh">历史上跌超 15% 的一共 ${deeper.length} 次，另外 ${others.length} 次</div>${rows}</div>` : ''}
       ${verdict ? `<div class="dd-note">${verdict}</div>` : ''}
+    </div>
+  </section>`;
+}
+
+/** 个股回撤体检：和组合那块同一个口径（单位净值 TWR），结论却相反——
+ *  组合那块说「分散救了它」，这块要说「一只股票内部无从分散，只能靠仓位和别的股票」。 */
+function stockDdPanel(r, st, name) {
+  const eps = (Array.isArray(r.episodes) ? r.episodes : []).slice().sort((a, b) => a.depth - b.depth);
+  if (!eps.length) return '';
+  const worst = eps[0];
+  const dp = (d) => `${d.slice(2, 4)}-${d.slice(5, 7)}`;
+  const fill = worst.fill;
+  const deeper = eps.filter((e) => e.depth <= -0.15);
+  const others = deeper.slice(1, 5);
+  const barW = fill == null ? 0 : Math.max(1, Math.min(100, fill * 100));
+  const rows = others.map((e) => `
+    <div class="dd-row">
+      <b class="num ddc">${pct(e.depth * 100, 1)}</b>
+      <span class="dd-when">${esc(dp(e.peak))} → ${esc(dp(e.trough))}</span>
+      <span class="dd-fix ${e.ongoing ? 'down' : ''}">${e.ongoing ? '还没爬回来' : `修复 ${num(e.upDays / 30.4, 1)} 个月`}</span>
+    </div>`).join('');
+
+  const benchMdd = st.benchMdd;
+  const gap = benchMdd != null ? worst.depth - benchMdd : null;
+  let verdict = '';
+  if (gap != null) {
+    verdict = `同一段行情，中证红利全收益跌 ${pct(benchMdd * 100, 1)}，${esc(name)} 跌 ${pct(worst.depth * 100, 1)}，多跌 <b class="num down">${(-gap * 100).toFixed(1)}pp</b>。单只股票内部无从分散——要压回撤，只有「多买几只」和「少买一点」两条路，选股本身救不了你。`;
+  } else {
+    verdict = `单只股票的回撤没法靠内部消化，只能靠仓位和别的股票分摊。`;
+  }
+  const cashNote = st.mddCash != null && Math.abs(st.mddCash - st.mdd) > 0.005
+    ? `回撤按剥离定投后的净值算（含定投会虚低到 ${pct(st.mddCash * 100, 1)}）`
+    : '';
+
+  return `
+  <section class="panel fade-in" style="margin-top:14px">
+    <div class="panel-head"><span class="panel-title">回撤体检</span><span class="section-note">${cashNote || '跌了多少 · 分红补了多少 · 多久爬回来'}</span></div>
+    <div class="panel-body" style="padding:14px">
+      <div class="dd-hero">
+        <div class="dd-k">最深回撤</div>
+        <div class="dd-v num">${pct(worst.depth * 100, 1)}</div>
+        <div class="dd-s">${esc(worst.peak)} 见顶 → ${esc(worst.trough)} 见底 · 跌了 <b>${num(worst.downDays / 30.4, 1)} 个月</b>${worst.ongoing ? `，<b class="down">到现在还没爬回来（还差 ${pct(Math.abs((worst.nowDepth || 0) * 100), 1)}）</b>` : `，<b>${num(worst.upDays / 30.4, 1)} 个月</b>才爬回前高`}</div>
+      </div>
+      <div class="dd-fill">
+        <div class="dd-fh"><span>跌的时候分红填掉</span><b class="num divc">${fill == null ? '—' : (fill * 100).toFixed(0) + '%'}</b></div>
+        <div class="dd-bar"><i style="width:${barW.toFixed(1)}%"></i></div>
+        <div class="dd-fs">期间到账 <b class="num divc">${bigMoney(worst.divReal || 0)}</b>，按除息日当天买回</div>
+      </div>
+      ${rows ? `<div class="dd-list"><div class="dd-lh">历史上跌超 15% 的一共 ${deeper.length} 次，另外 ${others.length} 次</div>${rows}</div>` : ''}
+      <div class="dd-note">${verdict}</div>
     </div>
   </section>`;
 }
@@ -671,13 +750,13 @@ function renderPort(market, structureData) {
   ${paramBar({ useMktCap: !useReplay })}
   ${(r.divMissing || []).length ? `<div class="banner" style="margin-bottom:12px">${icon('alert')}<div><b>${r.divMissing.length} 只股票没取到派息明细</b>（${r.divMissing.map(esc).join('、')}）——它们在本次回测里不计分红，不猜除权日。</div></div>` : ''}
   ${hero({
-    kicker: `组合回测 · ${structureData.name || '当前持仓'} · ${useReplay ? '持仓回放（当前股数，假设自起点持有）' : '投入回测（本金按目标结构买入）'}${structureData.plan ? ' · ' + entryLabel(structureData.entry) : ''} · ${from} → ${to} · ${num(s.years, 1)} 年`,
-    main: `组合 <b class="num gold">${retTxt}</b> <span class="thin">，年化 ${pctSign(s.cagr == null ? null : s.cagr * 100, 1)} · 基准 ${pctSign(s.benchCagr == null ? null : s.benchCagr * 100, 1)}</span>`,
-    desc: `期末 ${bigMoney(r.end)}（${useReplay ? '起点' : '投入'} ${bigMoney(r.totalIn)}）· 最大回撤 ${pct(s.mdd * 100, 1)}（基准 ${pct(s.benchMdd == null ? null : s.benchMdd * 100, 1)}）· 总分红 ${bigMoney(totalDiv)} · ${structureData.plan ? '结构 = 方案「' + esc(structureData.name) + '」 · 建仓 = ' + esc(entryLabel(structureData.entry)) + ' · 现金 ' + structureData.cashPct.toFixed(0) + '%' : structureData.fallback ? '账本为空，按演示持仓等权' : '结构 = 当前组合市值权重（股票 ' + (100 - cashPctOf(structureData)).toFixed(0) + '% + 现金 ' + cashPctOf(structureData).toFixed(0) + '%）'}`,
+    kicker: `组合回测 · ${structureData.name || '当前持仓'} · ${useReplay ? '持仓回放（当前股数）' : '投入回测'}${structureData.plan ? ' · ' + entryLabel(structureData.entry) : ''} · ${from} → ${to} · ${num(s.years, 1)} 年`,
+    main: `组合 <b class="num gold">${retTxt}</b> <span class="thin">，年化 ${pctSign(s.cagr == null ? null : s.cagr * 100, 1)}</span>`,
+    desc: `期末 ${bigMoney(r.end)}（${useReplay ? '起点' : '投入'} ${bigMoney(r.totalIn)}）· 总分红 ${bigMoney(totalDiv)} · ${structureData.plan ? '方案「' + esc(structureData.name) + '」· 现金 ' + structureData.cashPct.toFixed(0) + '%' : structureData.fallback ? '账本为空，按演示持仓等权' : '市值权重（股 ' + (100 - cashPctOf(structureData)).toFixed(0) + '% + 现金 ' + cashPctOf(structureData).toFixed(0) + '%）'}`,
     stats: [
       { k: '累计收益', v: retTxt, cls: vc, s: hasAdd ? '扣追加资金' : '起点本金' },
       { k: '年化', v: pctSign(s.cagr == null ? null : s.cagr * 100, 1), cls: vc, s: hasAdd ? 'XIRR 资金加权' : '复利折算' },
-      { k: '最大回撤', v: pct(s.mdd * 100, 1), cls: 'down', s: `基准 ${pct(s.benchMdd == null ? null : s.benchMdd * 100, 1)}` },
+      { k: '最大回撤', v: pct(s.mdd * 100, 1), cls: 'ddc', s: `基准 ${pct(s.benchMdd == null ? null : s.benchMdd * 100, 1)}` },
       { k: '总分红', v: bigMoney(totalDiv), cls: 'gold', s: divCagr == null ? '—' : '增速 ' + pctSign(divCagr, 1) + '/年' },
     ],
   })}
@@ -840,6 +919,8 @@ function renderStockPage(market, structureData) {
       { k: '分红', v: bigMoney(r.totalDiv), cls: 'divc', s: `全部再投，滚了 ${st.reinvest} 次` },
     ],
   })}
+
+  ${stockDdPanel(r, st, nameOf(code))}
 
   <section class="panel fade-in" style="margin-top:14px">
     <div class="panel-head"><span class="panel-title">净值曲线</span><span class="section-note">终值 <b style="color:var(--c-nav)">${num(st.navLast, 2)}</b> · <b style="color:var(--c-bench)">${num(st.benchLast, 2)}</b> · <b style="color:var(--c-lowvol)">${num(st.lowVolLast, 2)}</b>　|　中段回撤 · 下段每年分红</span></div>
@@ -1021,11 +1102,18 @@ function renderCompare(market, structureData) {
     const excess = x.isIndex ? null : (benchCagr != null && x.cagr != null ? (x.cagr - benchCagr) * 100 : null);
     const win = x.isIndex ? '—' : winYears(x.nav, bench?.rows);
     const barW = (Math.abs(x.mdd || 0) / maxMdd) * 100;
+    // 回撤只给一个百分比不够：跌 -17% 半年回来，和跌 -27% 三年没回来，是两种人生
+    // 注意：episodes 是按时间顺序的，第一段不是最深的
+    const epsAll = ddReport(x.unitNav || x.nav || [], [], []);
+    const worst = epsAll.length ? epsAll.reduce((a, b) => (b.depth < a.depth ? b : a)) : null;
+    const fix = !worst ? ''
+      : worst.ongoing ? `还没回来 · 差 ${Math.abs((worst.nowDepth || 0) * 100).toFixed(0)}%`
+      : `${num(worst.upDays / 30.4, 0)} 个月修复`;
     return `<tr>
       <td class="name"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${x.color};margin-right:6px"></span>${esc(x.name)}</td>
       <td class="num">${bigMoney(x.end)}</td>
       <td class="num ${upDown(x.cagr)}">${pctSign(x.cagr == null ? null : x.cagr * 100, 1)}</td>
-      <td class="num ddcell down"><i style="width:${barW.toFixed(1)}%"></i><span>${pct(x.mdd * 100, 0)}</span></td>
+      <td class="num ddcell down" data-v="${pct(x.mdd * 100, 0)}"><i style="width:${barW.toFixed(1)}%"></i><span>${pct(x.mdd * 100, 0)}<em>${fix}</em></span></td>
       <td class="num">${x.div == null ? '—' : bigMoney(x.div)}</td>
       <td class="num ${upDown(excess)}">${excess == null ? '—' : (excess >= 0 ? '+' : '') + excess.toFixed(1) + 'pp'}</td>
       <td class="num">${win}</td>
@@ -1165,7 +1253,7 @@ export async function renderBacktest() {
         holdings: p.holdings, capital: btState.capital, monthlyAdd: btState.monthlyAdd,
         from: clampFrom(btState.from), to: btState.to, mode: 'invest',
       });
-      rows.push({ kind: 'plan', name: p.name, color: COLORS[i % COLORS.length], nav: r.nav, end: r.end, cagr: r.stats.cagr, mdd: r.stats.mdd, div: r.totalDiv, width: 2 });
+      rows.push({ kind: 'plan', name: p.name, color: COLORS[i % COLORS.length], nav: r.nav, unitNav: r.unitNav, end: r.end, cagr: r.stats.cagr, mdd: r.stats.mdd, div: r.totalDiv, width: 2 });
     });
     // 红利策略：选股用「每年 4 月末收盘价」（cmp-yearly，78KB）跑一遍，
     // 拿到 10 年选中的成分股，再只拉这几十只的完整月线（每只 2.3KB）算净值。
@@ -1197,11 +1285,12 @@ export async function renderBacktest() {
       kind: 'rule',
       name: `红利精选(${plan.params.holdN}只)`, color: chartColors().sub,
       nav: plan.nav.map((pt) => [monthEnd(pt.ym), +(btState.capital * pt.nav).toFixed(2)]),
+      unitNav: plan.nav.map((pt) => [monthEnd(pt.ym), pt.nav]),
       end: btState.capital * (1 + plan.stats.total), cagr: plan.stats.cagr, mdd: plan.stats.mdd, div: null, width: 1.6,
       empty: noPick,
     });
-    if (b0.bench) rows.push({ kind: 'bench', name: '中证红利全收益', color: chartColors().bench, nav: b0.bench.rows, end: b0.bench.end, cagr: b0.bench.cagr, mdd: maxDrawdown(b0.bench.rows).mdd, div: null, width: 1.3, isIndex: true });
-    if (b0.lowVol) rows.push({ kind: 'bench', name: '红利低波全收益', color: chartColors().lowvol, nav: b0.lowVol.rows, end: b0.lowVol.end, cagr: b0.lowVol.cagr, mdd: maxDrawdown(b0.lowVol.rows).mdd, div: null, width: 1.4, isIndex: true });
+    if (b0.bench) rows.push({ kind: 'bench', name: '中证红利全收益', color: chartColors().bench, nav: b0.bench.rows, end: b0.bench.end, cagr: b0.bench.cagr, mdd: maxDrawdown(b0.bench.unitNav || b0.bench.rows).mdd, unitNav: b0.bench.unitNav, div: null, width: 1.3, isIndex: true });
+    if (b0.lowVol) rows.push({ kind: 'bench', name: '红利低波全收益', color: chartColors().lowvol, nav: b0.lowVol.rows, end: b0.lowVol.end, cagr: b0.lowVol.cagr, mdd: maxDrawdown(b0.lowVol.unitNav || b0.lowVol.rows).mdd, unitNav: b0.lowVol.unitNav, div: null, width: 1.4, isIndex: true });
     // 方案很多时给策略/指数留位置：最多 5 个方案，其余名额归基准行
     const planRows = rows.filter((r) => r.kind === 'plan');
     const restRows = rows.filter((r) => r.kind !== 'plan');
@@ -1255,6 +1344,19 @@ export function bindBacktest() {
   });
   const run = document.getElementById('btRun');
   if (run) run.onclick = () => readParams();
+  // 参数抽屉：只切 DOM，不重跑回测（改完点「运行回测」才重算）
+  const fold = document.getElementById('btFold');
+  const more = document.getElementById('btMore');
+  if (fold && more) {
+    fold.onclick = () => {
+      more.hidden = !more.hidden;
+      btState.paramOpen = !more.hidden;
+      fold.classList.toggle('on', btState.paramOpen);
+      fold.setAttribute('aria-expanded', btState.paramOpen ? 'true' : 'false');
+      const ed = fold.querySelector('.bf-edit');
+      if (ed) ed.textContent = btState.paramOpen ? '收起' : '调整';
+    };
+  }
   const planSel = document.getElementById('btPlan');
   if (planSel) planSel.onchange = () => {
     btState.planId = planSel.value;

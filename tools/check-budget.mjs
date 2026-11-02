@@ -23,7 +23,7 @@ const gzipSize = (p) => zlib.gzipSync(fs.readFileSync(path.join(ROOT, p)), { lev
 
 const BUDGET = {
   coreDataKB: 420,
-  shellKB: 160, // v1.8.0：修分组对比的数据链路 + 空态/颜色/文案，+4KB；首屏总量仍有余量
+  shellKB: 165, // v1.9.1：回撤体检 v2（单位净值 TWR + 回撤事件序列 + 重启面板），+4KB；首屏总量仍有余量
   firstLoadKB: 560,
   precacheKB: 620, // SW 安装时后台预缓存总量：ECharts 移出后应约 540KB（以前含图表库是 865KB）
 };

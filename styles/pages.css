@@ -273,6 +273,15 @@
 
 /* ===== 回测页 v2：参数条 / 指标卡 / 折叠 / 构成 ===== */
 .bt-params { padding: 14px 16px; }
+.bt-bar { display: flex; align-items: center; gap: 10px; }
+.bt-summary { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: var(--r); background: var(--surface-2); border: 1px solid var(--line); color: var(--text-2); font-size: 12.5px; text-align: left; }
+.bt-summary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.bt-summary svg { width: 14px; height: 14px; flex: 0 0 auto; color: var(--text-3); }
+.bt-summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt-summary .bf-edit { margin-left: auto; flex: 0 0 auto; font-size: 11px; color: var(--accent); }
+.bt-summary.on { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.bt-more { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.bt-footnote { margin-top: 8px; font-size: 10.5px; color: var(--text-3); }
 .bt-param-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .bt-field { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); white-space: nowrap; }
 .bt-field .input { width: 132px; }
@@ -293,8 +302,24 @@
 .bt-mini-stats > div { background: var(--surface); padding: 10px 12px; }
 .bt-mini-stats .k { font-size: 10px; color: var(--text-3); }
 .bt-mini-stats .v { margin-top: 3px; font-size: 17px; font-weight: 700; }
-/* 回撤体检：数字下面带一行解释，别再让人只看到一个百分比 */
-.dd-stats .dk { margin-top: 3px; font-size: 10px; line-height: 1.4; color: var(--text-3); }
+/* 回撤体检：一个大数字立在前面，其余降级成注脚；填坑用进度条，不让人读句子算百分比 */
+.dd-hero { padding: 2px 2px 12px; }
+.dd-k { font-size: 10px; color: var(--text-3); letter-spacing: .04em; }
+.dd-v { margin-top: 2px; font-size: 40px; line-height: 1.05; font-weight: 800; letter-spacing: -1.6px; color: var(--c-dd); }
+.dd-s { margin-top: 4px; font-size: 11.5px; line-height: 1.6; color: var(--text-3); }
+.dd-s b { color: var(--text-2); font-weight: 600; }
+.dd-fill { padding: 11px 0 13px; border-top: 1px solid var(--line); }
+.dd-fh { display: flex; justify-content: space-between; align-items: baseline; font-size: 11.5px; color: var(--text-2); }
+.dd-fh b { font-size: 16px; font-weight: 700; }
+.dd-bar { height: 6px; margin-top: 7px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.dd-bar i { display: block; height: 100%; border-radius: 3px; background: var(--c-div); }
+.dd-fs { margin-top: 6px; font-size: 10.5px; color: var(--text-3); }
+.dd-list { padding-top: 10px; border-top: 1px solid var(--line); }
+.dd-lh { margin-bottom: 7px; font-size: 10px; color: var(--text-3); }
+.dd-row { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 11.5px; }
+.dd-row b { min-width: 50px; font-size: 13px; }
+.dd-when { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.dd-fix { margin-left: auto; color: var(--text-2); }
 .dd-note { margin-top: 10px; font-size: 12px; line-height: 1.7; color: var(--text-2); padding: 11px 13px; border-radius: var(--r); background: var(--surface-2); border-left: 2px solid var(--accent); }
 .dd-note b { color: var(--text); }
 .dd-warn { display: flex; gap: 9px; align-items: flex-start; font-size: 11.5px; line-height: 1.65; color: var(--text-2); background: color-mix(in srgb, var(--warn) 9%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 26%, transparent); border-radius: var(--r); padding: 10px 12px; margin-bottom: 10px; }
@@ -307,6 +332,7 @@
 .ddcell { padding-right: 12px; }
 .ddcell i { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); height: 16px; border-radius: 3px; background: color-mix(in srgb, var(--c-dd) 20%, transparent); }
 .ddcell span { position: relative; text-shadow: 0 0 5px var(--surface), 0 0 5px var(--surface); }
+.ddcell em { display: block; margin-top: -1px; font-size: 9px; font-style: normal; color: var(--text-3); }
 .cmp-winner { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
 .cw { display: flex; flex-direction: column; gap: 3px; padding: 11px 13px; border-radius: var(--r); background: var(--surface-2); border: 1px solid var(--line); }
 .cw .k { font-size: 10px; color: var(--text-3); }

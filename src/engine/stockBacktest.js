@@ -8,7 +8,7 @@
  *  - 月追加：4/12 月末各入 6 个月
  *  - 不含税；价格不复权，分红单独计现金
  */
-import { priceAt, prevDps, isMonthEnd, maxDrawdown, sharpeOf, xirr, annualize, qualityOf, dyQuality } from './market.js';
+import { priceAt, prevDps, isMonthEnd, maxDrawdown, sharpeOf, xirr, annualize, qualityOf, dyQuality, stepUnits, ddReport } from './market.js';
 import { buildBenchmark } from './portfolioBacktest.js';
 
 const DAY_RATE = 0.015 / 365;
@@ -44,6 +44,11 @@ export function runStockBacktest(o) {
   const px = (date) => priceAt(series, date);
   const nav = [];
   const navHold = [];
+  // 单位净值（TWR）：剔除定投现金流，回撤只能按它算
+  const unitNav = [];
+  const divPU = [];
+  let cumDivPU = 0;
+  let units = 0;
   const trades = [];
   const divByY = {};
   const yearly = [];
@@ -102,6 +107,7 @@ export function runStockBacktest(o) {
         if (dps > 0 && shares > 0) {
           const amt = shares * dps;
           cash += amt;
+          if (units > 0) cumDivPU += amt / units;
           const dy = Number(String(xd).slice(0, 4));
           divByY[dy] = (divByY[dy] || 0) + amt;
           yearDiv += amt;
@@ -113,10 +119,12 @@ export function runStockBacktest(o) {
     }
 
     // 月追加
+    let extIn = 0;
     if (monthlyAdd > 0 && (isAprEnd || isDecEnd)) {
       const amt = monthlyAdd * 6;
       cash += amt;
       yearAdds += amt;
+      extIn += amt;
       // 现金流记负：追加是流出。记正号会让 XIRR 把追加当收益，年化虚高
       flows.push([date, -amt]);
     }
@@ -156,8 +164,10 @@ export function runStockBacktest(o) {
     }
 
     const price = px(date);
-    nav.push([date, cash + shares * (price || 0)]);
+    const v = cash + shares * (price || 0);
+    nav.push([date, v]);
     navHold.push([date, holdCash + holdShares * (price || 0)]);
+    { const st = stepUnits(units, v, extIn); units = st.units; unitNav.push([date, st.unitNav]); divPU.push([date, cumDivPU]); }
   }
 
   if (lastYear != null) {
@@ -186,12 +196,15 @@ export function runStockBacktest(o) {
   const bench = benchmarkSeries
     ? buildBenchmark({ dates, rows: benchmarkSeries, capital, monthlyAdd, from, to, flows: flowing })
     : null;
-  const ddStat = maxDrawdown(nav);
+  const unitRows = unitNav.filter(([, v]) => Number.isFinite(v));
+  const ddStat = maxDrawdown(unitRows.length ? unitRows : nav);
+  const episodes = ddReport(unitRows, divPU, trades.filter((t) => t.type === '分红').map((t) => ({ date: t.date, amount: t.amount || 0 })));
+  const benchMdd = bench ? maxDrawdown(bench.unitNav || bench.rows).mdd : null;
   const buys = trades.filter((t) => t.type === '买入');
   const sells = trades.filter((t) => t.type === '卖出');
 
   return {
-    code, from, to, dates, nav, navHold, trades, divByY, yearly,
+    code, from, to, dates, nav, navHold, unitNav, divPU, episodes, trades, divByY, yearly,
     totalDiv, totalIn, end, endHold,
     stats: {
       ret,
@@ -201,11 +214,13 @@ export function runStockBacktest(o) {
       mdd: ddStat.mdd,
       mddPeak: ddStat.mddPeak,
       mddTrough: ddStat.mddTrough,
-      sharpe: sharpeOf(nav),
+      sharpe: sharpeOf(unitRows.length ? unitRows : nav),
+      mddCash: maxDrawdown(nav).mdd,
       buys: buys.length,
       sells: sells.length,
       benchCagr: bench ? bench.cagr : null,
       benchEnd: bench ? bench.end : null,
+      benchMdd,
       excess: bench && cagr != null && bench.cagr != null ? cagr - bench.cagr : null,
       years: daysBetween(from, to) / 365.25,
     },
@@ -241,6 +256,10 @@ export function runInvestBacktest(o) {
   const px = (d) => priceAt(series, d) || 0;
   const nav = [];
   const hold = [];
+  const unitNav = [];   // 单位净值（TWR）：剔除定投现金流，回撤只能按它算
+  const divPU = [];
+  let cumDivPU = 0;
+  let units = 0;
   const trades = [];
   const divByY = {};
   const yearly = [];
@@ -295,7 +314,9 @@ export function runInvestBacktest(o) {
     lastYear = y;
 
     // 定投：每个月末投一笔，设 5000 就是每月 5000
+    let extIn = 0;
     if (i > 0 && monthlyAdd > 0 && monthEndDay && (!d0 || date >= d0)) {
+      extIn += monthlyAdd;
       cash += monthlyAdd;
       totalIn += monthlyAdd;
       yearIn += monthlyAdd;
@@ -318,6 +339,7 @@ export function runInvestBacktest(o) {
       if (!(shares > 0) || !(dps > 0)) continue;
       const amt = shares * dps;
       totalDiv += amt;
+      if (units > 0) cumDivPU += amt / units;
       const dy = Number(String(xd).slice(0, 4));
       divByY[dy] = (divByY[dy] || 0) + amt;
       yearDiv += amt;
@@ -334,8 +356,10 @@ export function runInvestBacktest(o) {
       }
     }
 
-    nav.push([date, shares * px(date) + cash]);
+    const vNow = shares * px(date) + cash;
+    nav.push([date, vNow]);
     hold.push([date, holdShares * px(date) + holdCash]);
+    { const st = stepUnits(units, vNow, extIn); units = st.units; unitNav.push([date, st.unitNav]); divPU.push([date, cumDivPU]); }
   }
 
   if (lastYear != null) {
@@ -350,7 +374,12 @@ export function runInvestBacktest(o) {
     ? xirr(flows.concat([[nav[nav.length - 1][0], end]]))
     : (capital > 0 ? annualize(end / capital - 1, from, to) : null);
   const retFund = totalIn > 0 ? end / totalIn - 1 : null;
-  const ddStat = maxDrawdown(nav);
+  const unitRows = unitNav.filter(([, v]) => Number.isFinite(v));
+  const ddStat = maxDrawdown(unitRows.length ? unitRows : nav);
+  // 分红明细：分红复投那笔记的是「这笔分红多少」（div），不够一手留现金那笔记的是 amount
+  const episodes = ddReport(unitRows, divPU, trades
+    .filter((t) => t.type === '分红复投' || t.type === '分红')
+    .map((t) => ({ date: t.date, amount: t.div || (t.type === '分红' ? t.amount : 0) || 0 })));
   const bench = o.benchmarkSeries
     ? buildBenchmark({ dates, rows: o.benchmarkSeries, capital, monthlyAdd, from, to, flows: flows.length > 1 })
     : null;
@@ -372,7 +401,7 @@ export function runInvestBacktest(o) {
     : null;
 
   return {
-    code, from, to, dates, nav, navHold: hold, trades, divByY, yearly,
+    code, from, to, dates, nav, navHold: hold, unitNav, divPU, episodes, trades, divByY, yearly,
     totalDiv, totalIn, end, endHold, shares, cash, lastPrice: dates.length ? px(dates[dates.length - 1]) : 0,
     stats: {
       ret: capital > 0 ? end / capital - 1 : null,
@@ -383,12 +412,14 @@ export function runInvestBacktest(o) {
       mdd: ddStat.mdd,
       mddPeak: ddStat.mddPeak,
       mddTrough: ddStat.mddTrough,
-      sharpe: sharpeOf(nav),
+      sharpe: sharpeOf(unitRows.length ? unitRows : nav),
+      mddCash: maxDrawdown(nav).mdd,
       buys: trades.filter((t) => t.type === '定投').length,
       reinvest: trades.filter((t) => t.type === '分红复投').length,
       divMissing: evs.length === 0,   // 没有派息明细：回测里一股分红都没有
       benchCagr: bench ? bench.cagr : null,
       benchEnd: bench ? bench.end : null,
+      benchMdd: bench ? maxDrawdown(bench.unitNav || bench.rows).mdd : null,
       excess: bench && cagr != null && bench.cagr != null ? cagr - bench.cagr : null,
       lowVolCagr: lowVol ? lowVol.cagr : null,
       lowVolEnd: lowVol ? lowVol.end : null,

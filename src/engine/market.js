@@ -176,6 +176,95 @@ export function maxDrawdown(rows) {
   return { mdd, mddPeak, mddTrough };
 }
 
+/**
+ * 单位净值（TWR）推进一格：外部流入按「流入前净值」增发份额。
+ * 总资产 nav 含月追加，拿来算回撤会把 -34.5% 稀释成 -23.8%（追加 2 万/月就能做到），
+ * 回撤 / 夏普必须走这条曲线。分红复投、再平衡是内部行为，不动份额。
+ */
+export function stepUnits(units, v, extIn) {
+  if (!(units > 0)) return { units: v > 0 ? v : 1, unitNav: 1 };
+  let u = units;
+  if (extIn > 0) {
+    const perUnit = (v - extIn) / u;   // 流入前的单位净值
+    if (perUnit > 0) u += extIn / perUnit;
+  }
+  return { units: u, unitNav: u > 0 ? v / u : null };
+}
+
+/**
+ * 回撤事件序列：把净值曲线切成一段段「从新高跌下去、再爬回新高」。
+ * 只有一个「最大回撤」看不出持有体验——跌了几次、每次多久见底、现在是否还在水下，才是用户要判断的。
+ */
+export function drawdownEpisodes(rows, minDepth = 0.03) {
+  const out = [];
+  if (!Array.isArray(rows) || rows.length < 2) return out;
+  const dayDiff = (a, b) => Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 86400000));
+  let peakV = -Infinity;
+  let peakDate = rows[0][0];
+  let troughV = Infinity;
+  let troughDate = null;
+  let running = false;
+
+  const close = (recoverDate) => {
+    if (!running || troughDate == null) { running = false; return; }
+    const depth = troughV / peakV - 1;
+    if (depth <= -minDepth) {
+      out.push({
+        peak: peakDate, peakV, trough: troughDate, troughV, depth,
+        recover: recoverDate || null,
+        downDays: dayDiff(peakDate, troughDate),
+        upDays: recoverDate ? dayDiff(troughDate, recoverDate) : dayDiff(troughDate, rows[rows.length - 1][0]),
+        ongoing: !recoverDate,
+      });
+    }
+    running = false;
+  };
+
+  for (const [d, v] of rows) {
+    if (!Number.isFinite(v)) continue;
+    if (v >= peakV) {
+      close(d);
+      // 峰值日期只在「真的刷新高」时移动：等于前高算恢复，不算新高，
+      // 否则 maxDrawdown 报 2021-05-26、这里报 2021-05-28，同一段回撤两个日期
+      if (v > peakV) { peakV = v; peakDate = d; }
+      troughV = Infinity;
+      troughDate = null;
+    } else {
+      running = true;
+      if (v < troughV) { troughV = v; troughDate = d; }
+    }
+  }
+  close(null);
+  return out;
+}
+
+/**
+ * 回撤报告：episodes + 「跌的时候分红填掉多少」。
+ * 填坑率走单位净值口径（每份净值分红 ÷ 峰值单位净值 ÷ 跌幅）；用金额算会被追加稀释。
+ */
+export function ddReport(unitRows, divPU = [], divEvents = []) {
+  const episodes = drawdownEpisodes(unitRows, 0.03);
+  const cumAt = (rows, d) => {
+    let v = 0;
+    for (const [x, y] of rows) { if (x <= d) v = y; else break; }
+    return v;
+  };
+  const unitAt = (d) => unitRows.find(([x]) => x === d)?.[1] ?? 1;
+  const lastV = unitRows.length ? unitRows[unitRows.length - 1][1] : null;
+  for (const e of episodes) {
+    // 还没爬回来的段：现在离前高还有多远，这比一个「未修复」标签有用
+    e.nowDepth = e.ongoing && lastV != null && e.peakV > 0 ? lastV / e.peakV - 1 : null;
+    const got = cumAt(divPU, e.trough) - cumAt(divPU, e.peak);
+    const peakUnit = unitAt(e.peak) || 1;
+    e.fill = e.depth < 0 && peakUnit > 0 ? got / peakUnit / Math.abs(e.depth) : null;
+    e.divPerUnit = got;
+    e.divReal = divEvents
+      .filter((x) => x.date >= e.peak && x.date <= e.trough)
+      .reduce((a, x) => a + (x.amount || 0), 0);
+  }
+  return episodes;
+}
+
 /** 日收益夏普（年化） */
 export function sharpeOf(rows, riskFree = 0.02) {
   if (!rows || rows.length < 3) return null;

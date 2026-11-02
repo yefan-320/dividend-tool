@@ -32,7 +32,7 @@
  *  - 现金年息 1.5%，日计
  *  - 不含税、不含佣金
  */
-import { priceAt, prevDps, isMonthEnd, maxDrawdown, sharpeOf, xirr, annualize } from './market.js';
+import { priceAt, prevDps, isMonthEnd, maxDrawdown, sharpeOf, xirr, annualize, stepUnits, ddReport } from './market.js';
 
 const DAY_RATE = 0.015 / 365;
 
@@ -122,6 +122,9 @@ export function buildBenchmark({ dates, rows, capital, monthlyAdd, from, to, flo
   let units = capital / p0;
   const flowsOut = [[dates[0], -capital]];
   const out = [[dates[0], capital]];
+  // 单位净值 = 点位 ÷ 起点点位：指数本身没有现金流，这才是它的「收益率曲线」，
+  // 拿来算回撤不会被月追加稀释（out 是含追加的总资产口径）
+  const unitNav = [[dates[0], 1]];
   // 指数点位脏数据（<=0）时沿用上一个有效点位，而不是回落到初始本金
   let lastP = p0;
   for (let i = 1; i < dates.length; i++) {
@@ -138,12 +141,13 @@ export function buildBenchmark({ dates, rows, capital, monthlyAdd, from, to, flo
       flowsOut.push([d, -amt]);
     }
     out.push([d, units * useP]);
+    unitNav.push([d, useP / p0]);
   }
   const end = out[out.length - 1][1];
   const cagr = flows
     ? xirr(flowsOut.concat([[dates[dates.length - 1], end]]))
     : annualize(end / capital - 1, from, to);
-  return { rows: out, end, cagr };
+  return { rows: out, unitNav, end, cagr };
 }
 
 /**
@@ -197,9 +201,17 @@ export function runPortfolioBacktest(o) {
   const endR = result.navR.length ? result.navR[result.navR.length - 1][1] : capital;
   const totalIn = capital + result.yearly.reduce((s, x) => s + (x.invest || 0), 0);
   const totalDiv = Object.values(result.divByY).reduce((s, x) => s + x, 0);
-  const dd = drawdownSeries(result.nav);
-  const ddR = drawdownSeries(result.navR);
-  const ddStat = maxDrawdown(result.nav);
+  // 回撤 / 夏普一律走单位净值（剔除月追加）：含现金流的 nav 会把回撤稀释掉
+  const unitRows = result.unitNav.filter(([, v]) => Number.isFinite(v));
+  const unitRowsR = result.unitNavR.filter(([, v]) => Number.isFinite(v));
+  const dd = drawdownSeries(unitRows);
+  const ddR = drawdownSeries(unitRowsR);
+  const ddStat = maxDrawdown(unitRows);
+
+  /* 回撤事件：跌了几次、每次多深多久、跌的时候分红填掉多少。
+     填坑率走单位净值口径——追加过的账户按金额算会被稀释（-34.5% 的坑，追加 2 万/月能把
+     填坑率从 13% 吹到 19%），所以不能直接用 events 里的金额除。 */
+  const episodes = ddReport(unitRows, result.divPU || [], (result.events || []).filter((x) => x.type === '分红'));
   const hasAdd = totalIn > capital;
   const flowsN = result.flowsN;
   const flowsR = result.flowsR;
@@ -215,11 +227,11 @@ export function runPortfolioBacktest(o) {
   const cagrR = hasAdd
     ? xirr(flowsR.concat([[result.navR[result.navR.length - 1][0], endR]]))
     : (retR == null ? null : annualize(retR, from, to));
-  const benchStat = bench ? maxDrawdown(bench.rows) : null;
+  const benchStat = bench ? maxDrawdown(bench.unitNav || bench.rows) : null;
 
   return {
     mode, from, to, dates,
-    nav: result.nav, navR: result.navR, dd, ddR,
+    nav: result.nav, navR: result.navR, unitNav: result.unitNav, unitNavR: result.unitNavR, dd, ddR, episodes,
     comp: result.comp, events: result.events, divByY: result.divByY, divByCode: result.divByCode,
     divMissing: result.divMissing || [],
     yearly: result.yearly, builds: result.builds, pending: result.pending,
@@ -234,7 +246,9 @@ export function runPortfolioBacktest(o) {
       mdd: ddStat.mdd,
       mddPeak: ddStat.mddPeak,
       mddTrough: ddStat.mddTrough,
-      sharpe: sharpeOf(result.nav),
+      sharpe: sharpeOf(unitRows),
+      // 口径对照：含追加的总资产口径（旧口径），只用来解释「为什么两个数不一样」
+      mddCash: maxDrawdown(result.nav).mdd,
       years: daysBetween(from, to) / 365.25,
       benchCagr: bench ? bench.cagr : null,
       benchEnd: bench ? bench.end : null,
@@ -286,6 +300,14 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
   const nav = [];
   const navR = [];
   const comp = [];
+  // 单位净值（TWR）：剔除「月追加」这类外部现金流后的净值，回撤 / 夏普只能用这条算。
+  // 直接把含现金流的 nav 拿去算回撤，追加的钱会抬高分母，把 -34.5% 稀释成 -23.8%。
+  const unitNav = [];
+  const unitNavR = [];
+  let units = 0;   // 复投口径份额
+  let unitsR = 0;  // 不复投口径份额
+  let cumDivPU = 0;      // 累计「每份净值分红」，回撤填坑率用它算
+  const divPU = [];      // [[date, cumDivPU]]
 
   /* ---------------- 建仓节奏状态 ---------------- */
   // entry 返回值：只新增字段，原有字段不变
@@ -577,6 +599,7 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
     const isAprEnd = monthEndDay && date.slice(5, 7) === '04';
     const isDecEnd = monthEndDay && date.slice(5, 7) === '12';
 
+    let extIn = 0;   // 当日外部现金流入（月追加），单位净值要按流入前净值增发份额
     if (lastYear != null && y !== lastYear) {
       yearly.push({ year: lastYear, nav0: yearNav0, nav1: nav[i - 1]?.[1] ?? null, div: yearDiv, cash: yearCash ?? 0, invest: yearAdds });
       yearNav0 = nav[i - 1]?.[1] ?? yearNav0;
@@ -601,6 +624,8 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
           const amt = n * dps;
           cash += amt;
           paid += amt;
+          // 单位净值口径的分红：每份净值收到多少。追加过的账户按金额算会被稀释
+          if (units > 0) cumDivPU += amt / units;
           divByCode[c] = (divByCode[c] || 0) + amt;
         }
         const nR = shR.get(c) || 0;
@@ -640,6 +665,7 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
       cash += amt;
       cashR += amt;
       yearAdds += amt;
+      extIn += amt;
       // 现金流记负：这是从口袋里掏出去的钱。记正号 XIRR 会把它当收益，年化虚高 2~4 倍
       flowsN.push([date, -amt]);
       flowsR.push([date, -amt]);
@@ -714,6 +740,8 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
     const vR = cashR + stockValueR(date);
     nav.push([date, v]);
     navR.push([date, vR]);
+    { const s = stepUnits(units, v, extIn); units = s.units; unitNav.push([date, s.unitNav]); divPU.push([date, cumDivPU]); }
+    { const s = stepUnits(unitsR, vR, extIn); unitsR = s.units; unitNavR.push([date, s.unitNav]); }
     const compRow = { cash: +cash.toFixed(2) };
     for (const c of active) {
       const n = sh.get(c) || 0;
@@ -750,7 +778,7 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
   }
 
   return {
-    nav, navR, comp, yearly, events, divByY, divByCode, builds, pending,
+    nav, navR, unitNav, unitNavR, divPU, comp, yearly, events, divByY, divByCode, builds, pending,
     divMissing: [...divMissing],
     flowsN, flowsR, cashEnd: cash, entry: entryOut,
   };
@@ -774,6 +802,13 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
   const nav = [];
   const navR = [];
   const comp = [];
+  // 单位净值（TWR）：剔除月追加这类外部现金流。回撤 / 夏普只能用这条算
+  const unitNav = [];
+  const unitNavR = [];
+  let units = 0;
+  let unitsR = 0;
+  let cumDivPU = 0;
+  const divPU = [];
   const events = [];
   const divByY = {};
   const divByCode = {};
@@ -805,6 +840,7 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
     const monthEndDay = isMonthEnd(dates, i);
     const isAprEnd = monthEndDay && date.slice(5, 7) === '04';
     const isDecEnd = monthEndDay && date.slice(5, 7) === '12';
+    let extIn = 0;   // 当日外部现金流入（月追加）
     if (lastYear != null && y !== lastYear) {
       yearly.push({ year: lastYear, nav0: yearNav0, nav1: nav[i - 1]?.[1] ?? null, div: yearDiv, cash: yearCash ?? 0, invest: yearAdds });
       yearNav0 = nav[i - 1]?.[1] ?? yearNav0;
@@ -844,6 +880,7 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
         const amtR = (shR.get(c) || 0) * dps;
         cashR += amtR;
         if (amt > 0) {
+          if (units > 0) cumDivPU += amt / units;
           divByY[y] = (divByY[y] || 0) + amt;
           divByCode[c] = (divByCode[c] || 0) + amt;
           yearDiv += amt;
@@ -856,6 +893,7 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
       cash += amt;
       cashR += amt;
       yearAdds += amt;
+      extIn += amt;
       // 同上：追加是流出，记负号
       flowsN.push([date, -amt]);
       flowsR.push([date, -amt]);
@@ -865,6 +903,8 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
     const vR = cashR + valueAt(date, shR);
     nav.push([date, v]);
     navR.push([date, vR]);
+    { const s = stepUnits(units, v, extIn); units = s.units; unitNav.push([date, s.unitNav]); divPU.push([date, cumDivPU]); }
+    { const s = stepUnits(unitsR, vR, extIn); unitsR = s.units; unitNavR.push([date, s.unitNav]); }
     const compRow = { cash: +cash.toFixed(2) };
     for (const c of codesAll) {
       const n = shN.get(c) || 0;
@@ -877,5 +917,5 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
   if (lastYear != null) {
     yearly.push({ year: lastYear, nav0: yearNav0, nav1: nav[nav.length - 1]?.[1] ?? null, div: yearDiv, cash: yearCash ?? 0, invest: yearAdds });
   }
-  return { nav, navR, comp, yearly, events, divByY, divByCode, builds: [], pending: [], flowsN, flowsR, cashEnd: cash, divMissing: [...divMissing] };
+  return { nav, navR, unitNav, unitNavR, divPU, comp, yearly, events, divByY, divByCode, builds: [], pending: [], flowsN, flowsR, cashEnd: cash, divMissing: [...divMissing] };
 }

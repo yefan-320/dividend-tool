@@ -253,7 +253,8 @@ const readCompare = async () => JSON.parse(await evalJs(`(() => {
     .find((t) => (t.querySelector('thead th')?.textContent || '').trim() === '组合');
   return JSON.stringify({
   hash: location.hash,
-  rows: table ? [...table.querySelectorAll('tbody tr')].map((tr) => [...tr.children].map((td) => td.textContent.replace(/\\s+/g, ' ').trim())) : [],
+  // 单元格带 data-v 时用它：回撤格里除数字外还有「几个月修复」的小字，改文案不该让断言挂
+  rows: table ? [...table.querySelectorAll('tbody tr')].map((tr) => [...tr.children].map((td) => td.dataset.v || td.textContent.replace(/\\s+/g, ' ').trim())) : [],
   canvas: !!document.querySelector('#cmpChart canvas'),
   text: (document.getElementById('app') || {}).innerText || '',
   banner: [...document.querySelectorAll('.banner.warn')].map((b) => b.textContent.trim()).join(' | '),
