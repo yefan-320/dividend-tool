@@ -300,6 +300,18 @@
 .dd-warn { display: flex; gap: 9px; align-items: flex-start; font-size: 11.5px; line-height: 1.65; color: var(--text-2); background: color-mix(in srgb, var(--warn) 9%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 26%, transparent); border-radius: var(--r); padding: 10px 12px; margin-bottom: 10px; }
 .dd-warn svg { flex: 0 0 auto; margin-top: 1px; color: var(--warn); }
 .dd-warn b { color: var(--text); }
+/* 对比表里的回撤条：同一尺度比长短，谁跌得狠一眼看得出来 */
+.ddc.num, .stat-value.ddc { color: var(--c-dd); }
+.bnc.num { color: var(--c-bench); }
+.ddcell { position: relative; }
+.ddcell { padding-right: 12px; }
+.ddcell i { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); height: 16px; border-radius: 3px; background: color-mix(in srgb, var(--c-dd) 20%, transparent); }
+.ddcell span { position: relative; text-shadow: 0 0 5px var(--surface), 0 0 5px var(--surface); }
+.cmp-winner { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.cw { display: flex; flex-direction: column; gap: 3px; padding: 11px 13px; border-radius: var(--r); background: var(--surface-2); border: 1px solid var(--line); }
+.cw .k { font-size: 10px; color: var(--text-3); }
+.cw b { font-size: 15.5px; font-weight: 700; letter-spacing: -.2px; }
+.cw .s { font-size: 10.5px; color: var(--text-2); }
 
 /* 红利精选成分：按行业分组，一眼看出有没有押在同一个周期上 */
 .st-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }

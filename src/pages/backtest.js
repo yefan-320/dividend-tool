@@ -1009,15 +1009,18 @@ function renderCompare(market, structureData) {
   const benchCagr = bench ? bench.cagr : null;
   const best = rows.length ? [...rows].sort((a, b) => b.end - a.end)[0] : null;
   const safest = rows.length ? [...rows].sort((a, b) => b.mdd - a.mdd)[0] : null;
+  // 回撤条：同一个尺度上比，一眼看出谁跌得狠
+  const maxMdd = Math.max(...rows.map((x) => Math.abs(x.mdd || 0)), 0.01);
   const table = rows.map((x) => {
     // 基准行不跟自己比：vs 指数、跑赢年数都留空
     const excess = x.isIndex ? null : (benchCagr != null && x.cagr != null ? (x.cagr - benchCagr) * 100 : null);
     const win = x.isIndex ? '—' : winYears(x.nav, bench?.rows);
+    const barW = (Math.abs(x.mdd || 0) / maxMdd) * 100;
     return `<tr>
       <td class="name"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${x.color};margin-right:6px"></span>${esc(x.name)}</td>
       <td class="num">${bigMoney(x.end)}</td>
       <td class="num ${upDown(x.cagr)}">${pctSign(x.cagr == null ? null : x.cagr * 100, 1)}</td>
-      <td class="num down">${pct(x.mdd * 100, 0)}</td>
+      <td class="num ddcell down"><i style="width:${barW.toFixed(1)}%"></i><span>${pct(x.mdd * 100, 0)}</span></td>
       <td class="num">${x.div == null ? '—' : bigMoney(x.div)}</td>
       <td class="num ${upDown(excess)}">${excess == null ? '—' : (excess >= 0 ? '+' : '') + excess.toFixed(1) + 'pp'}</td>
       <td class="num">${win}</td>
@@ -1042,12 +1045,13 @@ function renderCompare(market, structureData) {
   </section>
   ${strategyPanel()}
   <section class="panel fade-in" style="margin-top:14px">
-    <div class="panel-head"><span class="panel-title">结论</span></div>
-    <div class="panel-body" style="font-size:12.5px;line-height:1.8;color:var(--text-2)">
-      ${best ? `历史最赚：<b class="gold">${esc(best.name)}</b>（${bigMoney(best.end)}）·` : ''}
-      ${safest ? `最抗跌：<b class="down">${esc(safest.name)}</b>（回撤 ${pct(safest.mdd * 100, 0)}）·` : ''}
-      红利全收益：${bench ? bigMoney(bench.end) + '（' + pctSign(bench.cagr * 100, 1) + '/年）' : '—'}<br>
-      组合结构与选股规则的差异，就是这张表要回答的问题：谁在牛市更赚、谁在熊市更抗跌、分红谁更多。
+    <div class="panel-head"><span class="panel-title">结论</span><span class="section-note">谁在牛市更赚 · 谁在熊市更抗跌 · 分红谁更多</span></div>
+    <div class="panel-body" style="padding:12px 14px 14px">
+      <div class="cmp-winner">
+        ${best ? `<div class="cw"><span class="k">历史最赚</span><b class="num gold">${esc(best.name)}</b><span class="s">${bigMoney(best.end)} · 年化 ${pctSign(best.cagr * 100, 1)}</span></div>` : ''}
+        ${safest ? `<div class="cw"><span class="k">最抗跌</span><b class="num ddc">${esc(safest.name)}</b><span class="s">回撤 ${pct(safest.mdd * 100, 0)}</span></div>` : ''}
+        ${bench ? `<div class="cw"><span class="k">中证红利全收益</span><b class="num bnc">${bigMoney(bench.end)}</b><span class="s">年化 ${pctSign(bench.cagr * 100, 1)}</span></div>` : ''}
+      </div>
     </div>
   </section>`;
 }
