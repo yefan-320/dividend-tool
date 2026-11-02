@@ -69,7 +69,7 @@ function hero(cands, p) {
     <div class="hero-main">
       <div class="hero-kicker">${dot()} 今天 可买 ${buy} · 观察 ${wait} · 回避 ${avoid} · 数据不足 ${missing}</div>
       <div class="hero-line">先看财报质量，再看股息率</div>
-      <div class="hero-desc">亏损、支付率 ≥85%、经营现金流覆盖不足、股息率异常（&gt;15%）的直接回避——股息率再高也不买。只有财务健康、股息率 ≥5%、连续分红 ≥5 年的才给「可买」。</div>
+      <div class="hero-desc">亏损、支付率 ≥80%、现金流覆盖不足、股息率 &gt;15% 的直接回避。股息率 &gt;8% 只算观察——8%–9% 那一档长期年化只有 7.0%，5%–6.5% 才是甜区。财务健康、股息率 5%–8%、连续分红 ≥5 年才给「可买」。</div>
     </div>
     <div class="stats">
       <div class="stat"><div class="stat-label">总资产</div><div class="stat-value num">${moneyParts(total).v}<span style="font-size:13px;color:var(--text-2);font-weight:500"> ${moneyParts(total).u}</span></div><div class="stat-sub">现金 ${bigMoney(cash)}</div></div>
