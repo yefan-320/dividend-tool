@@ -9,38 +9,13 @@
  *  4. 无「页面加载失败」错误横幅；
  *  5. 恢复在线后页面正常。
  *
- * 前置：8766 静态服务 + Chrome 9222（D3_SITE / D3_CDP_PORT 可覆盖）。
+ * 前置：8766 静态服务 + Chrome 9222（D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 可覆盖）。
  * 用法：node tools/check-offline.mjs   （失败 exit 1）
  */
-const SITE = process.env.D3_SITE || 'http://127.0.0.1:8766/';
-const PORT = process.env.D3_CDP_PORT || '9222';
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+import { cdpConnect, sleep } from './lib/cdp.mjs';
 
-const list = await fetch(`http://127.0.0.1:${PORT}/json/list`).then((r) => r.json());
-const page = list.find((t) => t.type === 'page');
-if (!page) { console.error('找不到 Chrome 页面 target，请确认 Chrome 已启动'); process.exit(1); }
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-let id = 0;
-const pending = new Map();
-ws.addEventListener('message', (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); p(m); }
-});
-await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', rej); });
-const send = (method, params = {}, sessionId) => new Promise((res, rej) => {
-  const my = ++id;
-  pending.set(my, (m) => (m.error ? rej(new Error(method + ': ' + JSON.stringify(m.error))) : res(m.result)));
-  ws.send(JSON.stringify({ id: my, method, params, ...(sessionId ? { sessionId } : {}) }));
-});
-const evalJs = async (expression) => {
-  const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
-  return r.result?.value;
-};
-await send('Page.enable');
-await send('Runtime.enable');
-await send('Network.enable');
-await send('Network.setCacheDisabled', { cacheDisabled: true });
+const SITE = process.env.D3_SITE || 'http://127.0.0.1:8766/';
+const { send, evalJs, close } = await cdpConnect();
 
 const failures = [];
 const check = (name, ok, detail) => {
@@ -130,7 +105,7 @@ try {
     await send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
     if (swSession) await send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }, swSession).catch(() => {});
   } catch (e) { /* ignore */ }
-  ws.close();
+  close();
 }
 
 if (failures.length) {

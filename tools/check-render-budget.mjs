@@ -6,45 +6,21 @@
  *   冷渲染（首次，含数据/缓存构建）：today 300ms、scan 1500ms、stock 1200ms、backtest 3000ms、mine 400ms
  *   热渲染（后续重复渲染）：today 150ms、scan 250ms、stock 300ms、backtest 600ms、mine 250ms
  *
- * 前置：8766 静态服务 + Chrome 9222（可用 D3_SITE / D3_CDP_PORT 覆盖）。
+ * 前置：8766 静态服务 + Chrome 9222（可用 D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 覆盖）。
  * 用法：node tools/check-render-budget.mjs [--throttle=4]
  */
+import { cdpConnect, sleep } from './lib/cdp.mjs';
+
 const args = Object.fromEntries(process.argv.slice(2).filter((a) => a.includes('=')).map((a) => a.split('=')));
 const THROTTLE = Number(args.throttle) || 4;
 const SITE = process.env.D3_SITE || 'http://127.0.0.1:8766/';
-const PORT = process.env.D3_CDP_PORT || '9222';
 
 const BUDGET = {
   cold: { today: 300, scan: 1500, stock: 1200, backtest: 3000, mine: 400 },
   warm: { today: 150, scan: 250, stock: 300, backtest: 600, mine: 250 },
 };
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const list = await fetch(`http://127.0.0.1:${PORT}/json/list`).then((r) => r.json());
-const page = list.find((t) => t.type === 'page');
-if (!page) { console.error('找不到 Chrome 页面 target，请确认 Chrome 已启动'); process.exit(1); }
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-let id = 0;
-const pending = new Map();
-ws.addEventListener('message', (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); p(m); }
-});
-await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', rej); });
-const send = (method, params = {}) => new Promise((res, rej) => {
-  const my = ++id;
-  pending.set(my, (m) => (m.error ? rej(new Error(method + ': ' + JSON.stringify(m.error))) : res(m.result)));
-  ws.send(JSON.stringify({ id: my, method, params }));
-});
-const evalJs = async (expression) => {
-  const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
-  return r.result?.value;
-};
-await send('Page.enable');
-await send('Runtime.enable');
-await send('Network.enable');
-await send('Network.setCacheDisabled', { cacheDisabled: true });
+const { send, evalJs, close } = await cdpConnect();
 await send('Emulation.setCPUThrottlingRate', { rate: THROTTLE });
 
 const BASE = SITE + (SITE.includes('?') ? '&' : '?') + 'nosw=1&theme=dark';
@@ -100,7 +76,7 @@ for (const [name, times] of Object.entries(raw)) {
   if (coldOver) failures.push(`${name} 冷渲染 ${cold}ms > ${BUDGET.cold[name]}ms`);
   if (warmOver) failures.push(`${name} 热渲染 ${warm}ms > ${BUDGET.warm[name]}ms`);
 }
-ws.close();
+close();
 if (failures.length) {
   console.log('\n✗ 渲染预算超标：');
   for (const f of failures) console.log('  - ' + f);

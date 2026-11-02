@@ -1,7 +1,7 @@
 /**
  * 搜索实测：真浏览器里往输入框打字，看下拉里有没有那只股票。
  *
- * 前置：本地服务 8766 + Chrome 调试口 9222
+ * 前置：本地服务 8766 + Chrome 调试口 9222（可用 DSH_CDP_PORT / D3_CDP_PORT 覆盖端口）
  *   node /tmp/nocache-gz.mjs <项目根> 8766
  *   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --no-sandbox \
  *     --disable-gpu --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-search-prof about:blank
@@ -14,10 +14,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { cdpConnect, sleep } from './lib/cdp.mjs';
 
 const BASE = 'http://127.0.0.1:8766';
 const IDX = path.resolve(import.meta.dirname, '..', 'data', 'name-idx.txt');
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const ROWS = fs.readFileSync(IDX, 'utf8').split('\n').filter(Boolean).map((l) => {
   const [code, name, ind] = l.split('|');
@@ -26,45 +26,13 @@ const ROWS = fs.readFileSync(IDX, 'utf8').split('\n').filter(Boolean).map((l) =>
 
 /* ---------------- 极简 CDP ---------------- */
 
-let ws, send, evalJs, once;
+let send, evalJs, once, close;
 
 async function connect() {
-  const list = await fetch('http://127.0.0.1:9222/json/list').then((r) => r.json());
-  const page = list.find((t) => t.type === 'page');
-  if (!page) throw new Error('没有可用标签页');
-  ws = new WebSocket(page.webSocketDebuggerUrl);
-  let id = 0;
-  const pending = new Map();
-  const listeners = new Set();
-  ws.addEventListener('message', (ev) => {
-    const m = JSON.parse(ev.data);
-    if (m.id && pending.has(m.id)) {
-      const { res, rej } = pending.get(m.id);
-      pending.delete(m.id);
-      m.error ? rej(new Error(JSON.stringify(m.error))) : res(m.result);
-    } else if (m.method) {
-      for (const fn of listeners) fn(m);
-    }
-  });
-  await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-  send = (method, params = {}) => new Promise((res, rej) => {
-    const mid = ++id;
-    pending.set(mid, { res, rej });
-    ws.send(JSON.stringify({ id: mid, method, params }));
-  });
-  once = (method) => new Promise((res) => {
-    const fn = (m) => { if (m.method === method) { listeners.delete(fn); res(m); } };
-    listeners.add(fn);
-  });
-  evalJs = async (expr) => {
-    const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.text + ' ' + (r.exceptionDetails.exception?.description || ''));
-    return r.result.value;
-  };
+  ({ send, evalJs, once, close } = await cdpConnect());
 }
 
 async function goto(url, waitMs = 7000) {
-  await send('Page.enable');
   const loaded = once('Page.loadEventFired');
   await send('Page.navigate', { url });
   await Promise.race([loaded.catch(() => {}), sleep(20000)]);   // 别被一个永不触发的事件卡死
@@ -142,7 +110,12 @@ function check(where, kw, got, wantCode, wantName, { first = false } = {}) {
 
 /* ---------------- 主流程 ---------------- */
 
-const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+/* 固定种子的伪随机：抽样必须可复现。
+   原来用 Math.random，同一个「后两字」断言会时红时绿——抽到「合富中国」就红，
+   抽不到就绿，CI 凭什么红灯全看运气。种子写死，红就是真红。 */
+let __seed = 20261103;
+const rand = () => { __seed = (__seed * 1664525 + 1013904223) >>> 0; return __seed / 4294967296; };
+const pick = (arr) => arr[Math.floor(rand() * arr.length)];
 const rnd = (n) => {
   const out = [];
   const seen = new Set();
@@ -158,9 +131,7 @@ const rnd = (n) => {
 const bom = `?theme=dark&nosw=1&t=${Date.now()}`;
 
 async function main() {
-  await connect();
-  await send('Network.enable');
-  await send('Network.setCacheDisabled', { cacheDisabled: true });   // 别让浏览器缓存骗人
+  await connect();   // 连上后已 Network.enable + 关缓存，别让浏览器缓存骗人
 
   /* 预取索引：先开一页让 primeNameIndex 跑 */
   console.log('· 打开选股页');
@@ -277,7 +248,7 @@ async function main() {
   console.log('\n抽样明细（前 12 条）：');
   pass.slice(0, 12).forEach((p) => console.log('  ✓ ' + p));
 
-  try { ws.close(); } catch (e) {}
+  close();
   process.exit(fail.length ? 1 : 0);
 }
 

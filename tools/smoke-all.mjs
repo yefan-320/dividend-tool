@@ -7,51 +7,32 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cdpConnect, sleep } from './lib/cdp.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(__dirname, '../../report/design');
 fs.mkdirSync(OUT, { recursive: true });
 fs.mkdirSync(path.resolve(OUT, '..'), { recursive: true });
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BASE = 'http://127.0.0.1:8766/?theme=dark&nosw=1&offline=1';
 let bust = 0;
-let ws = null;
+let conn = null;
 let send = null;
 let evalJs = null;
 const results = [];
 const errors = [];
 
 async function connect() {
-  const list = await fetch('http://127.0.0.1:9222/json/list').then((r) => r.json());
-  const page = list.find((t) => t.type === 'page');
-  ws = new WebSocket(page.webSocketDebuggerUrl);
-  let id = 0;
-  const pending = new Map();
-  ws.addEventListener('message', (ev) => {
-    const m = JSON.parse(ev.data);
-    if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') {
-      errors.push('console.error: ' + (m.params.args || []).map((a) => a.value ?? a.description ?? '').join(' '));
-    }
-    if (m.method === 'Runtime.exceptionThrown') {
-      errors.push('exception: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
-    }
-    if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); p(m); }
+  conn = await cdpConnect({
+    onEvent: (m) => {
+      if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') {
+        errors.push('console.error: ' + (m.params.args || []).map((a) => a.value ?? a.description ?? '').join(' '));
+      }
+      if (m.method === 'Runtime.exceptionThrown') {
+        errors.push('exception: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
+      }
+    },
   });
-  await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', rej); });
-  send = (method, params = {}) => new Promise((res, rej) => {
-    const my = ++id;
-    pending.set(my, (m) => (m.error ? rej(new Error(method + ': ' + JSON.stringify(m.error))) : res(m.result)));
-    ws.send(JSON.stringify({ id: my, method, params }));
-  });
-  evalJs = async (expression) => {
-    const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
-    return r.result?.value;
-  };
-  await send('Page.enable');
-  await send('Runtime.enable');
-  await send('Network.enable');
-  await send('Network.setCacheDisabled', { cacheDisabled: true });
+  ({ send, evalJs } = conn);
 }
 
 async function waitReady(timeout = 18000) {
@@ -111,10 +92,8 @@ async function main() {
     await evalJs("(async()=>{ if(navigator.serviceWorker){const rs=await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r=>r.unregister()));} if(window.caches){const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k)));} return true;})()");
   } catch (e) {}
   // 备份本地数据，测试结束还原
-  const backup = await evalJs(`JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter(k=>k.startsWith('d3:')).map(k=>[k,localStorage.getItem(k)])))`);
-  const restore = async () => {
-    await evalJs(`(()=>{const keep=${JSON.stringify(backup)}; for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i); if(k&&k.startsWith('d3:')) localStorage.removeItem(k);} const obj=JSON.parse(keep||'{}'); for(const k in obj) localStorage.setItem(k,obj[k]); })()`);
-  };
+  const backup = await conn.readLSAll('d3:');
+  const restore = async () => { await conn.restoreLS(backup, 'd3:'); };
 
   // ---------- 1. 五个页面 ----------
   for (const [hash, title] of [['#today', '今天'], ['#scan', '选股'], ['#stock?code=600036', '招商银行'], ['#backtest', '回测'], ['#mine', '我的组合']]) {
@@ -314,7 +293,7 @@ async function main() {
   });
 
   // ---------- 7. 移动端 ----------
-  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await conn.setViewport({ width: 390, height: 844, dpr: 2, mobile: true });
   for (const [hash, title] of [['#today', '今天'], ['#scan', '选股'], ['#stock?code=600036', '招商银行'], ['#backtest', '回测'], ['#mine', '我的组合']]) {
     await scenario('移动端 ' + title, async () => {
       await nav(hash);
@@ -329,7 +308,7 @@ async function main() {
       // 移动端截图由 tools/shot.js 统一产出，冒烟只检查不落盘
     });
   }
-  await send('Emulation.clearDeviceMetricsOverride');
+  await conn.clearViewport();
 
   // ---------- 汇总 ----------
   await restore();
@@ -348,7 +327,7 @@ async function main() {
     console.log('控制台错误：none');
   }
   fs.writeFileSync(path.join(OUT, '../smoke-all.json'), JSON.stringify({ results, errors: realErrors }, null, 2));
-  ws.close();
+  conn.close();
   if (failed.length || realErrors.length) process.exit(1);
 }
 

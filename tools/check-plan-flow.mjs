@@ -8,15 +8,15 @@
  *     逐项核对页面渲染数值与引擎期望一致；
  *  3. 覆盖三种节奏（once / dip 未触发）+ 现金充足/不足两种账本 + 「记一笔」落账。
  *
- * 前置：8766 静态服务 + Chrome 9222（D3_SITE / D3_CDP_PORT 可覆盖）。
+ * 前置：8766 静态服务 + Chrome 9222（D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 可覆盖）。
  * 用法：node tools/check-plan-flow.mjs   （失败 exit 1）
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { cdpConnect, sleep } from './lib/cdp.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const SITE = process.env.D3_SITE || 'http://127.0.0.1:8766/';
-const PORT = process.env.D3_CDP_PORT || '9222';
 
 const readData = (f) => JSON.parse(fs.readFileSync(path.join(ROOT, 'data', f), 'utf8'));
 const quotesData = readData('quotes.json').quotes;
@@ -50,39 +50,11 @@ const cashLow = 100000;
 const shortfallWan = ((Math.max(0, needCash - cashLow)) / 1e4).toFixed(1);
 
 /* ---------- CDP 连接 ---------- */
-const list = await fetch(`http://127.0.0.1:${PORT}/json/list`).then((r) => r.json());
-const page = list.find((t) => t.type === 'page');
-if (!page) { console.error('找不到 Chrome 页面 target，请确认 Chrome 已启动'); process.exit(1); }
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-let id = 0;
-const pending = new Map();
-ws.addEventListener('message', (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); p(m); }
-});
-await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', rej); });
-const send = (method, params = {}) => new Promise((res, rej) => {
-  const my = ++id;
-  pending.set(my, (m) => (m.error ? rej(new Error(method + ': ' + JSON.stringify(m.error))) : res(m.result)));
-  ws.send(JSON.stringify({ id: my, method, params }));
-});
-const evalJs = async (expression) => {
-  const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
-  return r.result?.value;
-};
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-await send('Page.enable');
-await send('Runtime.enable');
-await send('Network.enable');
-await send('Network.setCacheDisabled', { cacheDisabled: true });
+const { send, evalJs, readLSAll, restoreLS, clearStorage, close } = await cdpConnect();
 /* 清 IndexedDB 里的行情缓存：页面会读上次刷到的实时价，Node 侧的期望值却按 data/quotes.json
    的快照算——两边价不一样，整手股数就会差 100/400 股，看着像 bug，其实是测试环境不确定。
    check-backtest-modes 早就这么做了，这里漏了。 */
-await send('Storage.clearDataForOrigin', {
-  origin: SITE.replace(/\/[^/]*$/, ''),
-  storageTypes: 'indexeddb,service_workers,cache_storage,local_storage',
-}).catch(() => {});
+await clearStorage(SITE.replace(/\/[^/]*$/, ''));
 
 const BASE = SITE + (SITE.includes('?') ? '&' : '?') + 'nosw=1&theme=dark';
 const failures = [];
@@ -94,7 +66,7 @@ const check = (name, ok, detail) => {
 // 备份 localStorage 的 d3:*
 await send('Page.navigate', { url: BASE + '#mine' });
 await sleep(1500);
-const backup = await evalJs(`(() => { const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('d3:')) o[k] = localStorage.getItem(k); } return JSON.stringify(o); })()`);
+const backup = await readLSAll('d3:');
 
 async function seed({ plans, txs, cash }) {
   await evalJs(`(() => {
@@ -216,15 +188,8 @@ try {
     check('卖出回收足够时不再提示缺口', !warn4, warn4 || '无');
   }
 } finally {
-  try {
-    await evalJs(`(() => {
-      const keep = JSON.parse(${JSON.stringify(backup || '{}')});
-      for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && k.startsWith('d3:') && !(k in keep)) localStorage.removeItem(k); }
-      for (const [k, v] of Object.entries(keep)) localStorage.setItem(k, v);
-      return 1;
-    })()`);
-  } catch (e) { /* ignore */ }
-  ws.close();
+  try { await restoreLS(backup, 'd3:'); } catch (e) { /* ignore */ }
+  close();
 }
 
 if (failures.length) {

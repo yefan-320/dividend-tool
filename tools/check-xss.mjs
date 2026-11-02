@@ -8,38 +8,13 @@
  *  3. 搜索框输入
  *  4. 恶意串里带 <img onerror> / <script> 两类载荷 —— 执行 = window.__xss* 被置位；注入成功 = DOM 里出现 img[src=x]
  *
- * 运行前启动 8766 静态服务与 Chrome 9222（可用 D3_SITE / D3_CDP_PORT 覆盖）。
+ * 运行前启动 8766 静态服务与 Chrome 9222（可用 D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 覆盖）。
  * 用法：node tools/check-xss.mjs     （有问题 exit 1）
  */
-const SITE = process.env.D3_SITE || 'http://127.0.0.1:8766/';
-const PORT = process.env.D3_CDP_PORT || '9222';
+import { cdpConnect, sleep } from './lib/cdp.mjs';
 
-const list = await fetch(`http://127.0.0.1:${PORT}/json/list`).then((r) => r.json());
-const page = list.find((t) => t.type === 'page');
-if (!page) { console.error('找不到 Chrome 页面 target，请确认 9222 已启动'); process.exit(1); }
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-let id = 0;
-const pending = new Map();
-ws.addEventListener('message', (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); p(m); }
-});
-await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', rej); });
-const send = (method, params = {}) => new Promise((res, rej) => {
-  const my = ++id;
-  pending.set(my, (m) => (m.error ? rej(new Error(method + ': ' + JSON.stringify(m.error))) : res(m.result)));
-  ws.send(JSON.stringify({ id: my, method, params }));
-});
-const evalJs = async (expression) => {
-  const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
-  return r.result?.value;
-};
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-await send('Page.enable');
-await send('Runtime.enable');
-await send('Network.enable');
-await send('Network.setCacheDisabled', { cacheDisabled: true });
+const SITE = process.env.D3_SITE || 'http://127.0.0.1:8766/';
+const { navigate, send, evalJs, readLSAll, restoreLS, close } = await cdpConnect();
 
 const failures = [];
 const report = (name, ok, detail) => {
@@ -48,11 +23,9 @@ const report = (name, ok, detail) => {
 };
 
 // 备份并稍后还原用户本地数据（只动 d3:*）
-const backup = await (async () => {
-  await send('Page.navigate', { url: SITE });
-  await sleep(1500);
-  return evalJs(`(() => { const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('d3:')) o[k] = localStorage.getItem(k); } return JSON.stringify(o); })()`);
-})();
+await navigate(SITE);
+await sleep(1500);
+const backup = await readLSAll('d3:');
 
 const XSS = '"><img src=x onerror="window.__xssA=1"><script>window.__xssB=1<\/script>';
 const base = SITE + (SITE.includes('?') ? '&' : '?') + 'nosw=1&theme=dark';
@@ -96,15 +69,8 @@ try {
   report('搜索框输入按文本处理', !r.exec && r.img === 0, JSON.stringify(r));
 } finally {
   // 还原 localStorage
-  try {
-    await evalJs(`(() => {
-      const keep = JSON.parse(${JSON.stringify(backup || '{}')});
-      for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && k.startsWith('d3:') && !(k in keep)) localStorage.removeItem(k); }
-      for (const [k, v] of Object.entries(keep)) localStorage.setItem(k, v);
-      return 1;
-    })()`);
-  } catch (e) { /* 页面可能不在同源 */ }
-  ws.close();
+  try { await restoreLS(backup, 'd3:'); } catch (e) { /* 页面可能不在同源 */ }
+  close();
 }
 
 if (failures.length) {

@@ -19,53 +19,27 @@
  *  5. 弹层：连续开关 5 次不抛异常；
  *  6. 个股回测：开月追加后，「累计收益」不再等于「期末 ÷ 本金」。
  *
- * 前置：8766 静态服务 + Chrome 9222（D3_SITE / D3_CDP_PORT 可覆盖）。
+ * 前置：8766 静态服务 + Chrome 9222（D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 可覆盖）。
  * 用法：node tools/check-ui-state.mjs   （失败 exit 1）
  */
+import { cdpConnect, sleep } from './lib/cdp.mjs';
 
 const SITE = process.env.D3_SITE || 'http://127.0.0.1:8766/';
-const PORT = process.env.D3_CDP_PORT || '9222';
 const BASE = SITE + (SITE.includes('?') ? '&' : '?') + 'offline=1&nosw=1&theme=dark';
 
 /* ---------- CDP ---------- */
-const list = await fetch(`http://127.0.0.1:${PORT}/json/list`).then((r) => r.json());
-const page = list.find((t) => t.type === 'page');
-if (!page) {
-  console.error('找不到 Chrome 页面 target，请确认 Chrome 已用 --remote-debugging-port=' + PORT + ' 启动');
-  process.exit(1);
-}
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-let id = 0;
-const pending = new Map();
 const errors = [];
-ws.addEventListener('message', (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') {
-    errors.push('console.error: ' + (m.params.args || []).map((a) => a.value ?? a.description ?? '').join(' '));
-  }
-  if (m.method === 'Runtime.exceptionThrown') {
-    errors.push('exception: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
-  }
-  if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); p(m); }
+const { send, evalJs, close } = await cdpConnect({
+  onEvent: (m) => {
+    if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') {
+      errors.push('console.error: ' + (m.params.args || []).map((a) => a.value ?? a.description ?? '').join(' '));
+    }
+    if (m.method === 'Runtime.exceptionThrown') {
+      errors.push('exception: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
+    }
+  },
 });
-await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', rej); });
-const send = (method, params = {}) => new Promise((res, rej) => {
-  const my = ++id;
-  pending.set(my, (m) => (m.error ? rej(new Error(method + ': ' + JSON.stringify(m.error))) : res(m.result)));
-  ws.send(JSON.stringify({ id: my, method, params }));
-});
-const evalJs = async (expression) => {
-  const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
-  return r.result?.value;
-};
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
-
-await send('Page.enable');
-await send('Runtime.enable');
-await send('Network.enable');
-await send('Network.setCacheDisabled', { cacheDisabled: true });
 
 const failures = [];
 const check = (name, ok, detail) => {
@@ -263,9 +237,9 @@ console.log('');
 if (failures.length) {
   console.error(`✗ ${failures.length} 项失败：`);
   for (const f of failures) console.error('  · ' + f);
-  ws.close();
+  close();
   process.exit(1);
 }
 console.log('页面交互状态检查全部通过。');
-ws.close();
+close();
 process.exit(0);

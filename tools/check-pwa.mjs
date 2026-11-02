@@ -5,38 +5,13 @@
  *  2. Chrome 的 Page.getInstallabilityErrors 为空；
  *  3. manifest 解析无错误，name/short_name/start_url/icons 齐全，icons 实际可访问（200）。
  *
- * 前置：8766 静态服务 + Chrome 9222（可用 D3_SITE / D3_CDP_PORT 覆盖）。
+ * 前置：8766 静态服务 + Chrome 9222（可用 D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 覆盖）。
  * 用法：node tools/check-pwa.mjs   （失败 exit 1）
  */
-const SITE = process.env.D3_SITE || 'http://127.0.0.1:8766/';
-const PORT = process.env.D3_CDP_PORT || '9222';
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+import { cdpConnect, sleep } from './lib/cdp.mjs';
 
-const list = await fetch(`http://127.0.0.1:${PORT}/json/list`).then((r) => r.json());
-const page = list.find((t) => t.type === 'page');
-if (!page) { console.error('找不到 Chrome 页面 target，请确认 Chrome 已启动'); process.exit(1); }
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-let id = 0;
-const pending = new Map();
-ws.addEventListener('message', (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); p(m); }
-});
-await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', rej); });
-const send = (method, params = {}) => new Promise((res, rej) => {
-  const my = ++id;
-  pending.set(my, (m) => (m.error ? rej(new Error(method + ': ' + JSON.stringify(m.error))) : res(m.result)));
-  ws.send(JSON.stringify({ id: my, method, params }));
-});
-const evalJs = async (expression) => {
-  const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
-  return r.result?.value;
-};
-await send('Page.enable');
-await send('Runtime.enable');
-await send('Network.enable');
-await send('Network.setCacheDisabled', { cacheDisabled: true });
+const SITE = process.env.D3_SITE || 'http://127.0.0.1:8766/';
+const { send, evalJs, close } = await cdpConnect();
 
 const failures = [];
 const check = (name, ok, detail) => {
@@ -109,7 +84,7 @@ try {
   check('manifest 检查', false, e.message);
 }
 
-ws.close();
+close();
 if (failures.length) {
   console.log('\n✗ PWA 检查失败：');
   for (const f of failures) console.log('  - ' + f);

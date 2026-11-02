@@ -98,8 +98,12 @@ const pageImports = new Map();
 for (const [, names, mod] of pageDefs) pageImports.set(mod, names.split(',').map((s) => s.trim()));
 for (const [mod, names] of pageImports) {
   const src = read(`src/pages/${mod}.js`);
+  // 页面拆成多文件后，入口会用 `export { x } from './子模块.js'` 再导出，
+  // 这类写法也要认；否则拆分后主文件名对得上、静态检查却红。
+  const reExport = [...src.matchAll(/export\s*\{([^}]+)\}\s*from/g)].flatMap((m) => m[1].split(',').map((s) => s.trim().split(/\s+as\s+/).pop()));
   for (const nm of names) {
-    if (!new RegExp(`export\\s+(?:async\\s+)?function\\s+${nm}\\b|export\\s+const\\s+${nm}\\b`).test(src)) {
+    const declared = new RegExp(`export\\s+(?:async\\s+)?function\\s+${nm}\\b|export\\s+(?:const|let)\\s+${nm}\\b`).test(src);
+    if (!declared && !reExport.includes(nm)) {
       issues.push(`main.js 从 pages/${mod}.js 导入了 ${nm}，但该文件没有导出`);
     }
   }

@@ -17,15 +17,15 @@
  *  C. 深浅色切换时 theme-color（iOS 状态栏/地址栏颜色）跟着变；
  *  D. 全程无 console.error / 未捕获异常。
  *
- * 前置：8766 静态服务 + Chrome 9222（D3_SITE / D3_CDP_PORT 可覆盖）。
+ * 前置：8766 静态服务 + Chrome 9222（D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 可覆盖）。
  * 用法：node tools/check-ios.mjs   （失败 exit 1）
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { cdpConnect, sleep } from './lib/cdp.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const SITE = process.env.D3_SITE || 'http://127.0.0.1:8766/';
-const PORT = process.env.D3_CDP_PORT || '9222';
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
 const failures = [];
@@ -55,59 +55,25 @@ check('弹层高度用 dvh + 内部滚动不传染（overscroll-behavior）', /m
 check('移动端 toast 提到 tabbar 之上（含安全区）', /#toast\s*\{\s*bottom:\s*calc\(84px \+ env\(safe-area-inset-bottom\)\)/.test(comp));
 
 /* ---------------- CDP ---------------- */
-const list = await fetch(`http://127.0.0.1:${PORT}/json/list`).then((r) => r.json());
-const page = list.find((t) => t.type === 'page');
-if (!page) { console.error('找不到 Chrome 页面 target，请确认 Chrome 已启动'); process.exit(1); }
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-let id = 0;
-const pending = new Map();
-let errors = [];
-ws.addEventListener('message', (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') {
-    errors.push('console.error: ' + (m.params.args || []).map((a) => a.value ?? a.description ?? '').join(' '));
-  }
-  if (m.method === 'Runtime.exceptionThrown') {
-    errors.push('exception: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
-  }
-  if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); p(m); }
+const errors = [];
+const { send, evalJs, waitFor, setViewport, clearViewport, close } = await cdpConnect({
+  onEvent: (m) => {
+    if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') {
+      errors.push('console.error: ' + (m.params.args || []).map((a) => a.value ?? a.description ?? '').join(' '));
+    }
+    if (m.method === 'Runtime.exceptionThrown') {
+      errors.push('exception: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
+    }
+  },
 });
-await new Promise((res, rej) => { ws.addEventListener('open', res); ws.addEventListener('error', rej); });
-const send = (method, params = {}) => new Promise((res, rej) => {
-  const my = ++id;
-  pending.set(my, (m) => (m.error ? rej(new Error(method + ': ' + JSON.stringify(m.error))) : res(m.result)));
-  ws.send(JSON.stringify({ id: my, method, params }));
-});
-const evalJs = async (expression) => {
-  const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
-  return r.result?.value;
-};
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
-async function waitFor(expr, label, timeout = 12000) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < timeout) {
-    const v = await evalJs(expr).catch(() => null);
-    if (v) return v;
-    await sleep(120);
-  }
-  throw new Error('等待超时：' + (label || expr));
-}
-
-await send('Page.enable');
-await send('Runtime.enable');
-await send('Network.enable');
-await send('Network.setCacheDisabled', { cacheDisabled: true });
 
 const UA_IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 const BASE = SITE + (SITE.includes('?') ? '&' : '?') + 'offline=1&nosw=1&theme=dark';
 let navSeq = 0;
 
 async function emulation(width, height, dpr) {
-  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dpr, mobile: true, screenWidth: width, screenHeight: height });
-  await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-  await send('Emulation.setUserAgentOverride', { userAgent: UA_IPHONE, platform: 'iPhone' });
+  await setViewport({ width, height, dpr, mobile: true, screenSize: true, touch: true, ua: UA_IPHONE, platform: 'iPhone' });
 }
 async function goto(hash) {
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -218,11 +184,9 @@ check('切回原主题后 theme-color 复原', afterLight.theme === before.theme
 
 check('全程无 console.error / 未捕获异常', errors.length === 0, errors.slice(0, 3).join(' | '));
 
-await send('Emulation.clearDeviceMetricsOverride').catch(() => {});
-await send('Emulation.setTouchEmulationEnabled', { enabled: false }).catch(() => {});
-await send('Emulation.setUserAgentOverride', { userAgent: '' }).catch(() => {});
+await clearViewport();
 
-ws.close();
+close();
 console.log('');
 if (failures.length) {
   console.log(`✗ iOS / 移动端适配检查失败 ${failures.length} 项`);
