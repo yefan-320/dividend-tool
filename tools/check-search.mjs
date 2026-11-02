@@ -1,7 +1,7 @@
 /**
  * 搜索实测：真浏览器里往输入框打字，看下拉里有没有那只股票。
  *
- * 前置：本地服务 8766 + Chrome 调试口 9222（可用 DSH_CDP_PORT / D3_CDP_PORT 覆盖端口）
+ * 前置：本地服务 8766 + Chrome 调试口 9222（可用 D3_CDP_PORT 覆盖端口）
  *   node /tmp/nocache-gz.mjs <项目根> 8766
  *   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --no-sandbox \
  *     --disable-gpu --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-search-prof about:blank
@@ -172,22 +172,24 @@ async function main() {
   }
 
   /* ---- 3. 随机 30 只：名字后两个字 ----
-     通用后缀（股份/科技/电子/化工…）全市场几十只，8 条上限里当然不一定有它——
-     那种只验「能搜出东西」；只对独特后缀断言「必须命中目标」。 */
-  const tailCount = new Map();
-  for (const r of ROWS) {
-    const t = r.name.replace(/\s+/g, '').slice(-2);
-    tailCount.set(t, (tailCount.get(t) || 0) + 1);
-  }
+     搜索是「名字包含」口径（stockSearch.js 用 includes），候选数必须按包含算，
+     不能按「名字恰好以它结尾」算——后者会把「中国」「银行」这种高频包含词误判成
+     独特后缀，于是要求它必须挤进前 8 条。合富中国就是这么被误判成必红的：
+     按后缀算只有 2 只，按包含算有 62 只候选抢 8 个位置。
+     判据：候选 ≤ 下拉上限 → 全都在列表里，严格断言目标命中；否则只验「有结果」。 */
+  const LIMIT = 8;   // stockSearch.js: searchStocks({ limit = 8 })
+  const nameNorm = (r) => r.name.replace(/\s+/g, '');
+  const candCount = (kw) => ROWS.filter((r) => nameNorm(r).includes(kw) || (r.ind || '').includes(kw)).length;
   for (const r of samples) {
-    const tail = r.name.replace(/\s+/g, '').slice(-2);
+    const tail = nameNorm(r).slice(-2);
     const res = await suggest('#scanSearch', tail);
     const items = res.items || [];
-    if ((tailCount.get(tail) || 99) <= 6) check('选股页·后两字', tail, items, r.code, r.name);
+    const n = candCount(tail);
+    if (n <= LIMIT) check('选股页·后两字', tail, items, r.code, r.name);
     else {
       items.length
-        ? pass.push(`选股页·后两字 「${tail}」（${tailCount.get(tail)} 只同名后缀）→ 有结果 ${items.length} 条`)
-        : fail.push(`选股页·后两字 「${tail}」无结果（这个后缀全市场有 ${tailCount.get(tail)} 只）`);
+        ? pass.push(`选股页·后两字 「${tail}」（${n} 个候选抢 ${LIMIT} 条）→ 有结果 ${items.length} 条`)
+        : fail.push(`选股页·后两字 「${tail}」无结果（这个关键词全市场有 ${n} 个候选）`);
     }
   }
 

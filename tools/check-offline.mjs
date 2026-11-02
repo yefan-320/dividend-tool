@@ -9,7 +9,7 @@
  *  4. 无「页面加载失败」错误横幅；
  *  5. 恢复在线后页面正常。
  *
- * 前置：8766 静态服务 + Chrome 9222（D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 可覆盖）。
+ * 前置：8766 静态服务 + Chrome 9222（D3_SITE / D3_CDP_PORT 可覆盖）。
  * 用法：node tools/check-offline.mjs   （失败 exit 1）
  */
 import { cdpConnect, sleep } from './lib/cdp.mjs';

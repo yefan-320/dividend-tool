@@ -10,7 +10,7 @@
    首屏和离线外壳都不需要它，放进 SHELL 会让「装好、离线可用」多等约 40% 的下载。
    改由页面空闲时发 warm-charts 消息补缓存（见 WARM / warmAll），
    没补上也不影响在线画图——外壳的 fetch 处理器会把首次取到的文件顺手缓存。 */
-const SHELL_CACHE = 'hongli-shell-v1.9.3';
+const SHELL_CACHE = 'hongli-shell-v1.9.4';
 const DATA_CACHE = 'hongli-data-v3';
 /** 数据和代码分开放；数据量大又天天变，不该被代码改版连坐 */
 const cacheNameFor = (u) => (/\/data\//.test(u) || /\/vendor\//.test(u) ? DATA_CACHE : SHELL_CACHE);
@@ -18,7 +18,10 @@ const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './styles/tokens.css', './styles/base.css', './styles/components.css', './styles/pages.css',
   './src/main.js', './src/data.js', './src/net.js', './src/store.js', './src/charts.js',
-  './src/pages/today.js', './src/pages/scan.js', './src/pages/stock.js', './src/pages/backtest.js', './src/pages/mine.js', './src/pages/plans.js',
+  './src/pages/today.js', './src/pages/scan.js', './src/pages/stock.js', './src/pages/mine.js', './src/pages/plans.js',
+  // 回测页拆成三块（1871 行单文件 → 入口/视图/核心），三块都必须进 SHELL：
+  // 少了任意一块，新装用户断网首访时模块图求值失败，整站白屏（连错误横幅都出不来）。
+  './src/pages/backtest.js', './src/pages/backtest/core.js', './src/pages/backtest/view.js',
   './src/engine/plan.js', './src/engine/finance.js', './src/engine/portfolio.js', './src/engine/market.js',
   './src/engine/portfolioBacktest.js', './src/engine/stockBacktest.js', './src/engine/backtest.js', './src/engine/verdict.js',
   './src/ui/icons.js', './src/ui/format.js', './src/ui/toast.js', './src/ui/modal.js', './src/ui/buy.js', './src/ui/table.js',

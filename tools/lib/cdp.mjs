@@ -4,12 +4,16 @@
  * 为什么单独一个文件：每个脚本过去各自抄一份 connect / send / evalJs / pending 样板
  * （20–40 行），改一次超时或错误信息要改十遍。
  *
- * 前置：Chrome 用 --remote-debugging-port=9222 启动（端口可用 DSH_CDP_PORT / D3_CDP_PORT 覆盖）。
+ * 前置：Chrome 用 --remote-debugging-port=9222 启动（端口可用 D3_CDP_PORT 覆盖）。
  * 注意：这些脚本共用同一个页面 target，**绝不能并发跑**。
+ *
+ * 只认 D3_CDP_PORT 这一个变量：不读宿主机/CI 的通用环境变量，
+ * 否则环境里冒出一个同名变量就会让全套检查静默连到另一个 Chrome 实例，
+ * 在一个陌生页面上跑断言（假绿假红都说不清）。
  */
 
-/** 默认调试端口：DSH_CDP_PORT > D3_CDP_PORT > 9222 */
-export const CDP_PORT = process.env.DSH_CDP_PORT || process.env.D3_CDP_PORT || '9222';
+/** 默认调试端口：D3_CDP_PORT 或 9222 */
+export const CDP_PORT = process.env.D3_CDP_PORT || '9222';
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -81,7 +85,11 @@ export async function cdpConnect(options = {}) {
   const evalJs = async (expression) => {
     const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
-    return r.result?.value;
+    // 没有 result 说明这次求值没真正完成（导航中 / executionContext 被销毁）。
+    // 不许静默返回 undefined——调用方的 `x || []` 会把它当成「结果为空」继续断言，
+    // 于是"检查失败"被读成"页面上什么都没有"。宁可在这里炸。
+    if (!r.result) throw new Error('Runtime.evaluate 没有 result（求值未完成）：' + String(expression).slice(0, 60));
+    return r.result.value;
   };
 
   /** 等一个 CDP 事件（如 Page.loadEventFired），resolve 出原始消息。 */
@@ -94,7 +102,12 @@ export async function cdpConnect(options = {}) {
   const waitFor = async (expr, label, timeoutMs = 15000) => {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
-      const v = await evalJs(expr).catch(() => null);
+      // 表达式在页面还没就绪时报错是正常的（选择器还不存在），继续等。
+      // 但命令级超时（页面卡死）不能吞：否则这里会耗满 120s 才报「等待超时」。
+      const v = await evalJs(expr).catch((e) => {
+        if (/超时/.test(e.message)) throw e;
+        return null;
+      });
       if (v) return v;
       await sleep(120);
     }

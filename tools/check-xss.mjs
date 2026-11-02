@@ -8,7 +8,7 @@
  *  3. 搜索框输入
  *  4. 恶意串里带 <img onerror> / <script> 两类载荷 —— 执行 = window.__xss* 被置位；注入成功 = DOM 里出现 img[src=x]
  *
- * 运行前启动 8766 静态服务与 Chrome 9222（可用 D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 覆盖）。
+ * 运行前启动 8766 静态服务与 Chrome 9222（可用 D3_SITE / D3_CDP_PORT 覆盖）。
  * 用法：node tools/check-xss.mjs     （有问题 exit 1）
  */
 import { cdpConnect, sleep } from './lib/cdp.mjs';

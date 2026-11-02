@@ -9,7 +9,7 @@ import { db, nameOf, quote } from '../../data.js';
 import { priceAt } from '../../engine/market.js';
 import { chartColors, drawBarsVs, drawDivChart, drawDonut, drawEnvChart, drawLineMini, drawMultiLineChart, drawNavChart, drawPortfolioChart, drawPriceChart, drawSimilarChart, drawWaterfall } from '../../charts.js';
 import { mountStockSearch } from '../../ui/stockSearch.js';
-import { DAY, addYears, benchRows, btState, clampFrom, compTimer, ctx, dailyStart, drawdownOf, envCompare, readParams, repayCurve, rerenderHook, setCompTimer, stopCompPlay, structure, todayStr } from './core.js';
+import { DAY, addYears, btState, clampFrom, compTimer, ctx, dailyStart, drawdownOf, envCompare, readParams, repayCurve, rerenderHook, setCompTimer, stopCompPlay, todayStr } from './core.js';
 
 export function modeTabs() {
   const mk = (id, label, active) => `<button class="btn sm ${active ? 'primary' : 'ghost'}" data-btmode="${id}">${label}</button>`;

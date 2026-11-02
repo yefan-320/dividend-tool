@@ -8,7 +8,7 @@
  *     逐项核对页面渲染数值与引擎期望一致；
  *  3. 覆盖三种节奏（once / dip 未触发）+ 现金充足/不足两种账本 + 「记一笔」落账。
  *
- * 前置：8766 静态服务 + Chrome 9222（D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 可覆盖）。
+ * 前置：8766 静态服务 + Chrome 9222（D3_SITE / D3_CDP_PORT 可覆盖）。
  * 用法：node tools/check-plan-flow.mjs   （失败 exit 1）
  */
 import fs from 'node:fs';

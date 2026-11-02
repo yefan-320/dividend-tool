@@ -1,4 +1,4 @@
-# 红利工具 · v1.9.3
+# 红利工具 · v1.9.4
 
 > 线上版（手机可直接打开，不依赖本机服务）：**https://yefan-320.github.io/dividend-tool/**
 
@@ -151,7 +151,7 @@ src/engine/verdict.js           单股决策：亏损/支付率≥85%/现金流�
 
 ```bash
 node --test test/*.test.js     # 181 个用例（finance/portfolio/market/verdict/plan/建仓节奏/组合回测/个股回测/数据层/本地账本/格式化/联网解析/差分测试）
-node tools/check-static.mjs    # 静态检查：index.html / sw.js SHELL / import / manifest / 数据文件引用
+node tools/check-static.mjs    # 静态检查：index.html / sw.js SHELL（正反双向）/ import / manifest / 数据文件引用 / 页面导出（含再导出）
 node tools/smoke-all.mjs       # 浏览器全站冒烟：5 页 + 4 选股视图 + 3 我的视图 + 方案编辑/执行清单 + 深浅色 + 移动端（36 项）
 node tools/audit-app.mjs       # 数据覆盖/一致性/异常值/新鲜度 + 引擎自检
 node tools/check-budget.mjs    # 首屏性能预算：核心数据/JS gzip 体积、懒加载结构、SW 预缓存
@@ -163,6 +163,7 @@ node tools/check-backtest-modes.mjs # 组合对比/持仓回放端到端：引�
 node tools/check-ui-state.mjs  # 页面交互状态：排序切回、指标卡可点、回撤列表行数、弹层连开关、个股收益口径
 node tools/check-ios.mjs       # iOS 适配：安全区/dvh/输入框 16px/点按/tabbar，3 种机型 × 5 页仿真
 node tools/check-offline.mjs   # 离线可用性：页面 + SW 双断网，今天/选股/个股可打开
+node tools/check-offline-boot.mjs  # 离线首访：全新安装 + 断网首访，首屏模块必须全部来自 SW 缓存（会清站点数据，单独跑）
 node tools/perf.mjs            # 冷/热加载性能（含 ECharts 按需加载核验）
 node tools/perf-boot.mjs       # 首屏启动：本地 vs 慢 4G + 4x CPU（骨架出现时间 / 完整首屏）
 node tools/perf-render.mjs     # 各页面 render() 耗时（CPU 4x，比较优化前后）

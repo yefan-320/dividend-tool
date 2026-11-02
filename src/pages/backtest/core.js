@@ -6,7 +6,7 @@
 import { db, loadCmpFin, loadDailyMany, loadDailyMeta, loadFinanceHistory, loadIndexDaily, loadMonthlyFor, quote } from '../../data.js';
 import { loadCash, loadPlans, loadTxs } from '../../store.js';
 import { buildSeries, buildTradingDates, monthEnd, priceAt } from '../../engine/market.js';
-import { pct, pctSign } from '../../ui/format.js';
+import { pctSign } from '../../ui/format.js';
 import { toast } from '../../ui/toast.js';
 
 export const todayStr = () => db.generated || '2026-10-30';

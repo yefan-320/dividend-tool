@@ -5,7 +5,7 @@
  *  2. Chrome 的 Page.getInstallabilityErrors 为空；
  *  3. manifest 解析无错误，name/short_name/start_url/icons 齐全，icons 实际可访问（200）。
  *
- * 前置：8766 静态服务 + Chrome 9222（可用 D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 覆盖）。
+ * 前置：8766 静态服务 + Chrome 9222（可用 D3_SITE / D3_CDP_PORT 覆盖）。
  * 用法：node tools/check-pwa.mjs   （失败 exit 1）
  */
 import { cdpConnect, sleep } from './lib/cdp.mjs';

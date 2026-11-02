@@ -17,7 +17,7 @@
  *  6. 空账本（演示持仓）下不崩、不出 NaN / Infinity / undefined；
  *  7. 全程无 console.error / 未捕获异常。
  *
- * 前置：8766 静态服务 + Chrome 9222（D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 可覆盖）。
+ * 前置：8766 静态服务 + Chrome 9222（D3_SITE / D3_CDP_PORT 可覆盖）。
  * 用法：node tools/check-backtest-modes.mjs   （失败 exit 1）
  */
 import fs from 'node:fs';

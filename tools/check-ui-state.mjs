@@ -19,7 +19,7 @@
  *  5. 弹层：连续开关 5 次不抛异常；
  *  6. 个股回测：开月追加后，「累计收益」不再等于「期末 ÷ 本金」。
  *
- * 前置：8766 静态服务 + Chrome 9222（D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 可覆盖）。
+ * 前置：8766 静态服务 + Chrome 9222（D3_SITE / D3_CDP_PORT 可覆盖）。
  * 用法：node tools/check-ui-state.mjs   （失败 exit 1）
  */
 import { cdpConnect, sleep } from './lib/cdp.mjs';

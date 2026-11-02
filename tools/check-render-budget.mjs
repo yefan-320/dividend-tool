@@ -6,7 +6,7 @@
  *   冷渲染（首次，含数据/缓存构建）：today 300ms、scan 1500ms、stock 1200ms、backtest 3000ms、mine 400ms
  *   热渲染（后续重复渲染）：today 150ms、scan 250ms、stock 300ms、backtest 600ms、mine 250ms
  *
- * 前置：8766 静态服务 + Chrome 9222（可用 D3_SITE / DSH_CDP_PORT / D3_CDP_PORT 覆盖）。
+ * 前置：8766 静态服务 + Chrome 9222（可用 D3_SITE / D3_CDP_PORT 覆盖）。
  * 用法：node tools/check-render-budget.mjs [--throttle=4]
  */
 import { cdpConnect, sleep } from './lib/cdp.mjs';

@@ -9,12 +9,12 @@ import { xirr as financeXirr } from './finance.js';
  *  - 价格查询：取「不晚于该日」的最近一个点
  */
 
-/** 现金年息 1.5%，按自然日计息（回测里闲置现金的收益；日利率） */
+/** 闲置现金日利率：名义年息 1.5%，按日复利（实际年化 1.5113%） */
 export const CASH_DAY_RATE = 0.015 / 365;
 
 /**
- * 自然日差（非负，四舍五入）。全引擎唯一的日期差口径：
- * 现金计息、年化年数、回撤天数都走这里，别处不许再写一份。
+ * 自然日差（非负，取整到天）。用于现金计息、回撤天数、持仓天数。
+ * 年化不走这里（annualize 要连续时间）；非法日期串会得 NaN 并一路穿透，调用方须保证入参合法。
  */
 export function daysBetween(a, b) {
   return Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 86400000));

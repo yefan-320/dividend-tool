@@ -20,7 +20,7 @@ const PAGES = [
 ];
 
 /** 版本号：发版时跟 sw.js 的 SHELL_CACHE、package.json 一起升 */
-const APP_VERSION = '1.9.3';
+const APP_VERSION = '1.9.4';
 
 const app = document.getElementById('app');
 const sidebar = document.getElementById('sidebar');
