@@ -506,13 +506,6 @@ body.modal-open { overflow: hidden; }
   table.table.stack-on-mobile td:has(> .btn:only-child)::before { content: none; }
 }
 
-/* 数据新鲜度徽标（今天页） */
-.data-age {
-  display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 999px;
-  border: 1px solid var(--line); background: var(--surface-2); color: var(--text-3); font-size: 10.5px;
-}
-.data-age.stale { color: var(--warn); border-color: rgba(224, 163, 62, .35); background: rgba(224, 163, 62, .08); }
-
 /* 侧栏版本号 */
 .side-ver { font-family: var(--mono); font-size: 10px; color: var(--text-3); margin-top: 6px; opacity: .8; }
 .side-ver .ver-time { opacity: .7; }

@@ -148,37 +148,11 @@ export async function loadFinanceHistory(codes = null) {
   return db.finHistory;
 }
 
-/** 财报是否整包拿过（对比模式的全市场选股需要） */
-export function financeHistoryComplete() {
-  return !db.finDegraded && finDone.size > 0;
-}
-
 /** 最近年报财务：{eps, roe, nm, liab, ocfps, np, year}，没有返回 null */
 export function finOf(code) {
   const a = db.finance?.[code];
   if (!a) return null;
   return { eps: a[0], roe: a[1], nm: a[2], liab: a[3], ocfps: a[4], np: a[5], year: db.finYear };
-}
-
-/** 历史年报财务：[{year, eps, roe, nm, liab, ocfps}, ...] */
-export function finHistoryOf(code) {
-  const rows = db.finHistory?.[code];
-  if (!rows) return [];
-  return rows.map(([year, eps, roe, nm, liab, ocfps]) => ({ year, eps, roe, nm, liab, ocfps }));
-}
-
-export async function loadMonthly() {
-  if (db.monthly) return db.monthly;
-  try {
-    const j = await getJson('monthly.json', { timeout: 120000 });
-    // 空壳（网络失败被 SW 兜成 {}）不能当「加载成功」，否则会把空数据永久记进 db.monthly
-    if (!j || !j.months || !Object.keys(j.months).length) throw new Error('返回的是空数据');
-    db.monthly = j.months;
-  } catch (e) {
-    // 月线 6.4MB 不预缓存、也不进首屏：只有「对比模式的红利策略选股」和「起点早于 2014-06」才会用到它
-    throw new Error('月线数据没加载成功：只有对比模式的全市场选股、或把回测起点拖到 2014-06 之前才需要这 6.5MB 月线。请联网后重试；只想看自己的组合用日 K 即可，不需要月线。原始错误：' + e.message);
-  }
-  return db.monthly;
 }
 
 /* ---------------- 组合对比专用的小数据 ----------------
@@ -381,10 +355,6 @@ export function nameOf(code) {
   return db.quotes[code]?.n || db.baseline?.pool?.[code]?.n || code;
 }
 
-export function dividendsOf(code) {
-  return db.baseline?.dividends?.[code] || null;
-}
-
 /* 分红索引：baseline.dividends 有 5400+ 只，今天页/选股页每次渲染都要扫全池。
    预先摊平成 Map（一次 O(n)），避免反复 Object.keys + filter + sort。
 
@@ -534,9 +504,4 @@ export async function ensureDividends(codes) {
 function hasEv(code) {
   const d = db.baseline?.dividends?.[code];
   return !!(d && Array.isArray(d.ev) && d.ev.length);
-}
-
-/** 分红数据里有没有逐笔除权日——回测用它判断「这只到底取到明细没有」 */
-export function hasDivEvents(code) {
-  return hasEv(String(code));
 }

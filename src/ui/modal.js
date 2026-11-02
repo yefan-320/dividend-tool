@@ -110,30 +110,3 @@ export function confirmDialog({ title = '确认', message = '', okLabel = '确�
     });
   });
 }
-
-/** 输入框 → Promise<string|null> */
-export function promptDialog({ title = '输入', label = '', value = '', placeholder = '' } = {}) {
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = (v) => { if (done) return; done = true; resolve(v); };
-    openModal({
-      title,
-      body: `<label class="modal-field"><span>${esc(label)}</span><input class="input" id="modalInput" value="${esc(value)}" placeholder="${esc(placeholder)}"></label>`,
-      actions: [
-        { label: '取消', kind: 'ghost', onClick: () => finish(null) },
-        {
-          label: '确定', kind: 'primary', onClick: () => {
-            const v = document.getElementById('modalInput')?.value?.trim() || '';
-            if (!v) return false;
-            finish(v);
-          },
-        },
-      ],
-      onMount: (root) => {
-        onClose = () => finish(null);
-        const input = root.querySelector('#modalInput');
-        input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); root.querySelector('[data-act="1"]').click(); } };
-      },
-    });
-  });
-}

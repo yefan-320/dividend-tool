@@ -106,17 +106,6 @@ export function saveCash(v) {
   return safe;
 }
 
-/** 把任意代码变成可读的交易行（给表单回显） */
-export function describeTx(tx) {
-  const q = quote(tx.code);
-  return {
-    ...tx,
-    name: q?.n || nameOf(tx.code),
-    priceNow: q?.p ?? null,
-  };
-}
-
-
 /* ---------------- 组合方案（一套代码 + 目标权重 + 建仓节奏） ---------------- */
 const PLAN_KEY = 'd3:plans';
 
