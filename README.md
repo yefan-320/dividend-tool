@@ -1,4 +1,4 @@
-# 红利工具 · v1.9.2
+# 红利工具 · v1.9.3
 
 > 线上版（手机可直接打开，不依赖本机服务）：**https://yefan-320.github.io/dividend-tool/**
 
@@ -212,11 +212,13 @@ src/
   charts.js  日 K 蜡烛 / 组合全景 / 回撤 / 分红 / 瀑布 / 多线
   engine/    finance / portfolio / market / portfolioBacktest / stockBacktest / backtest / verdict
   pages/     today / scan / stock / backtest / mine
+    backtest/  回测页拆分：core（状态与计算）/ view（片段、绘图、事件绑定）
   ui/        icons / format / toast / modal / buy
 data/        静态 JSON（核心快照 + 演示持仓日 K；其余日 K 按需联网）
 sw.js        Service Worker（PWA 离线缓存）
 manifest.webmanifest  PWA 清单
 tools/       fetch / audit / derivatives / backtest / check-static / perf / perf-boot / perf-render / shot / smoke / ui-audit
+  lib/cdp.mjs  各 check / smoke 脚本共用的 CDP 客户端（连接、evalJs、viewport、localStorage 备份还原）
 test/        node --test 单测
 ```
 
