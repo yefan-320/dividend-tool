@@ -2,6 +2,8 @@
 /**
  * 渲染耗时门禁：CPU 4x 降速下直接调用各页面 render()，检查冷/热渲染是否超预算（CI 里跑，防性能回退）。
  *
+ * 计时前先预热一遍（网络请求走完），只量渲染本身——数据加载受机器/服务器影响大，
+ * 混进来会让这条检查在 CI 上假红，实测同一台机器就能差六倍。
  * 预算按「本地实测 × 3 倍左右」给 CI 机器留余量（CI runner 比 Mac 慢）：
  *   冷渲染（首次，含数据/缓存构建）：today 300ms、scan 1500ms、stock 1200ms、backtest 3000ms、mine 400ms
  *   热渲染（后续重复渲染）：today 150ms、scan 250ms、stock 300ms、backtest 600ms、mine 250ms
@@ -40,6 +42,14 @@ const raw = JSON.parse(await evalJs(`(async () => {
     mine: ['./src/pages/mine.js', 'renderMine'],
   };
   const out = {};
+  // 预热：先各渲染一遍，把分红/财报/分位/日K 这些网络请求走完。
+  // render 系列函数里 await 着真实的数据加载，不预热的话计时里混着网络——
+  // 实测同一台机器同一份代码能在 60~408ms 之间跳，CI 上更是 2363ms，
+  // 那是 runner 慢 + 服务器不压缩，不是渲染回退。这条检查只该管渲染。
+  for (const [name, [path, fnName]] of Object.entries(mods)) {
+    const m = await import(path);
+    if (m[fnName]) { try { await m[fnName](); } catch (e) { /* 预热失败留给下面报 */ } }
+  }
   for (const [name, [path, fnName]] of Object.entries(mods)) {
     const m = await import(path);
     const fn = m[fnName];
