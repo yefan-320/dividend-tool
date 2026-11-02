@@ -983,7 +983,12 @@ function strategyPanel() {
     .map(([g, list]) => `
       <div class="st-ind">
         <div class="st-ind-head">${esc(g)}<span>${list.length}</span></div>
-        <div class="st-ind-body">${list.map((x) => `<span class="st-chip" data-code="${esc(x.code)}" title="${esc(x.name)} 股息率 ${(Number(x.dy) || 0).toFixed(1)}%">${esc(x.name)}<i>${(Number(x.dy) || 0).toFixed(1)}%</i></span>`).join('')}</div>
+        <div class="st-ind-body">${list.map((x) => {
+          // pool 里的名字是上游截断过的，还带 XD/XR/DR 除权前缀（「XD海尔智」）；
+          // 行情里的名字是完整的，优先用它
+          const nm = db.quotes?.[x.code]?.n || String(x.name || '').replace(/^(XD|XR|DR)/, '');
+          return `<span class="st-chip" data-code="${esc(x.code)}" title="${esc(nm)} 股息率 ${(Number(x.dy) || 0).toFixed(1)}%">${esc(nm)}<i>${(Number(x.dy) || 0).toFixed(1)}%</i></span>`;
+        }).join('')}</div>
       </div>`).join('');
 
   return `
