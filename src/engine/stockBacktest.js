@@ -8,10 +8,8 @@
  *  - 月追加：4/12 月末各入 6 个月
  *  - 不含税；价格不复权，分红单独计现金
  */
-import { priceAt, prevDps, isMonthEnd, maxDrawdown, sharpeOf, xirr, annualize, qualityOf, dyQuality, stepUnits, ddReport } from './market.js';
+import { priceAt, prevDps, isMonthEnd, maxDrawdown, sharpeOf, xirr, annualize, qualityOf, dyQuality, stepUnits, ddReport, daysBetween, CASH_DAY_RATE } from './market.js';
 import { buildBenchmark } from './portfolioBacktest.js';
-
-const DAY_RATE = 0.015 / 365;
 
 /**
  * @param {object} o
@@ -96,8 +94,8 @@ export function runStockBacktest(o) {
     }
     lastYear = y;
 
-    if (i > 0 && cash > 0) cash *= 1 + DAY_RATE * daysBetween(dates[i - 1], date);
-    if (i > 0 && holdCash > 0) holdCash *= 1 + DAY_RATE * daysBetween(dates[i - 1], date);
+    if (i > 0 && cash > 0) cash *= 1 + CASH_DAY_RATE * daysBetween(dates[i - 1], date);
+    if (i > 0 && holdCash > 0) holdCash *= 1 + CASH_DAY_RATE * daysBetween(dates[i - 1], date);
 
     // 分红到账：有几笔派几笔，每笔按自己的除权除息日
     {
@@ -227,10 +225,6 @@ export function runStockBacktest(o) {
     bench,
     lastTrades: trades.slice(-12),
   };
-}
-
-function daysBetween(a, b) {
-  return Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 86400000));
 }
 
 /**

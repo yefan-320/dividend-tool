@@ -9,6 +9,17 @@ import { xirr as financeXirr } from './finance.js';
  *  - 价格查询：取「不晚于该日」的最近一个点
  */
 
+/** 现金年息 1.5%，按自然日计息（回测里闲置现金的收益；日利率） */
+export const CASH_DAY_RATE = 0.015 / 365;
+
+/**
+ * 自然日差（非负，四舍五入）。全引擎唯一的日期差口径：
+ * 现金计息、年化年数、回撤天数都走这里，别处不许再写一份。
+ */
+export function daysBetween(a, b) {
+  return Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 86400000));
+}
+
 /** 月末日期占位（字符串可比较；倒推时用） */
 export function monthEnd(ym) {
   const [y, m] = ym.split('-').map(Number);
@@ -198,7 +209,6 @@ export function stepUnits(units, v, extIn) {
 export function drawdownEpisodes(rows, minDepth = 0.03) {
   const out = [];
   if (!Array.isArray(rows) || rows.length < 2) return out;
-  const dayDiff = (a, b) => Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 86400000));
   let peakV = -Infinity;
   let peakDate = rows[0][0];
   let troughV = Infinity;
@@ -212,8 +222,8 @@ export function drawdownEpisodes(rows, minDepth = 0.03) {
       out.push({
         peak: peakDate, peakV, trough: troughDate, troughV, depth,
         recover: recoverDate || null,
-        downDays: dayDiff(peakDate, troughDate),
-        upDays: recoverDate ? dayDiff(troughDate, recoverDate) : dayDiff(troughDate, rows[rows.length - 1][0]),
+        downDays: daysBetween(peakDate, troughDate),
+        upDays: recoverDate ? daysBetween(troughDate, recoverDate) : daysBetween(troughDate, rows[rows.length - 1][0]),
         ongoing: !recoverDate,
       });
     }

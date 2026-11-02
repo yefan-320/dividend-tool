@@ -32,18 +32,13 @@
  *  - 现金年息 1.5%，日计
  *  - 不含税、不含佣金
  */
-import { priceAt, prevDps, isMonthEnd, maxDrawdown, sharpeOf, xirr, annualize, stepUnits, ddReport } from './market.js';
-
-const DAY_RATE = 0.015 / 365;
+import { priceAt, prevDps, isMonthEnd, maxDrawdown, sharpeOf, xirr, annualize, stepUnits, ddReport, daysBetween, CASH_DAY_RATE } from './market.js';
+import { normalizeEntry } from './plan.js';
 
 function addMonths(dayStr, n) {
   const d = new Date(dayStr + 'T00:00:00Z');
   d.setUTCMonth(d.getUTCMonth() + n);
   return d.toISOString().slice(0, 10);
-}
-
-function daysBetween(a, b) {
-  return Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 86400000));
 }
 
 function drawdownSeries(nav) {
@@ -54,25 +49,6 @@ function drawdownSeries(nav) {
     out.push([d, peak > 0 ? (v / peak - 1) * 100 : 0]);
   }
   return out;
-}
-
-const ENTRY_MODES = ['once', 'staged', 'dip'];
-const DEFAULT_ENTRY = { mode: 'once', months: 12, minDy: 5.5 };
-const MAX_ENTRY_MONTHS = 60;
-
-/**
- * 建仓节奏参数归一化（口径与 engine/plan.js 的 normalizeEntry 一致，避免 UI / 引擎两套数）：
- *  - mode 非法 → once
- *  - months clamp 1..60（默认 12）
- *  - minDy clamp 0..20（默认 5.5，两位小数）
- */
-function normalizeEntry(entry) {
-  const e = entry && typeof entry === 'object' ? entry : {};
-  const monthsRaw = Number(e.months);
-  const minDyRaw = Number(e.minDy);
-  const months = Math.min(MAX_ENTRY_MONTHS, Math.max(1, Math.round(Number.isFinite(monthsRaw) ? monthsRaw : DEFAULT_ENTRY.months)));
-  const minDy = Math.min(20, Math.max(0, Math.round((Number.isFinite(minDyRaw) ? minDyRaw : DEFAULT_ENTRY.minDy) * 100) / 100));
-  return { mode: ENTRY_MODES.includes(e.mode) ? e.mode : DEFAULT_ENTRY.mode, months, minDy };
 }
 
 /**
@@ -610,8 +586,8 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
 
     if (i > 0) {
       const days = daysBetween(dates[i - 1], date);
-      if (cash > 0) cash *= 1 + DAY_RATE * days;
-      if (cashR > 0) cashR *= 1 + DAY_RATE * days;
+      if (cash > 0) cash *= 1 + CASH_DAY_RATE * days;
+      if (cashR > 0) cashR *= 1 + CASH_DAY_RATE * days;
     }
 
     // 分红到账：每笔按自己的除权除息日入账；没有 ev 的股票不计（进 divMissing）
@@ -850,8 +826,8 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
     lastYear = y;
     if (i > 0) {
       const days = daysBetween(dates[i - 1], date);
-      if (cash > 0) cash *= 1 + DAY_RATE * days;
-      if (cashR > 0) cashR *= 1 + DAY_RATE * days;
+      if (cash > 0) cash *= 1 + CASH_DAY_RATE * days;
+      if (cashR > 0) cashR *= 1 + CASH_DAY_RATE * days;
     }
     {
       // 每笔按自己的除权除息日；没明细的股票一律不计（divMissing 里记一笔）
