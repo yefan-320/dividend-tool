@@ -361,6 +361,10 @@ check('月追加 2 万：年化落在合理区间（现金流符号没记反）'
 
 check('全程无 console.error / 未捕获异常', errors.length === 0, errors.slice(0, 3).join(' | '));
 
+/* 收尾清账本：这个检查会写入 7 个方案 + 一堆交易，留着不擦的话，
+   后跑的检查（尤其 smoke-all 的回测 tab）会在这堆状态上继续跑。
+   storage 与开头的 clearStorage 对称，检查之间不该互相污染。 */
+await clearStorage(SITE.replace(/\/[^/]*$/, '')).catch(() => {});
 close();
 console.log('');
 if (failures.length) {

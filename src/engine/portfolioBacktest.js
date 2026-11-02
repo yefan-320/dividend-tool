@@ -237,6 +237,347 @@ export function runPortfolioBacktest(o) {
   };
 }
 
+/* ============================ 投入模型的零件 ============================ */
+
+/* runInvest 的主循环要在一个价位表上同时维护「复投 / 不复投」两套持仓，
+   所以把与日期循环无关的零件（估值、权重、买入、再平衡）提到模块级：
+   每个函数只通过 st（可变状态）+ env（不变量）两个对象拿东西，
+   主函数剩下的就只有「每天按顺序做哪几件事」。 */
+
+/** 持仓市值（只算有正价格的） */
+function positionValue(shares, active, px, date) {
+  let v = 0;
+  for (const c of active) {
+    const n = shares.get(c) || 0;
+    if (n <= 0) continue;
+    const p = px(c, date);
+    if (p > 0) v += n * p;
+  }
+  return v;
+}
+
+/** 有效权重：未建仓股票的目标份额，平均摊给当前可买的股票 */
+function effectiveWeights(active, wOf, list) {
+  const set = new Set(list);
+  let unbuildW = 0;
+  for (const c of active) if (!set.has(c)) unbuildW += wOf.get(c) || 0;
+  const n = list.length;
+  const m = new Map();
+  for (const c of list) m.set(c, (wOf.get(c) || 0) + (n ? unbuildW / n : 0));
+  return m;
+}
+
+/**
+ * 把股票部分调到目标权重的买/卖。结构再平衡会卖出超配；分红复投传 sell:false 只买不卖。
+ * opt: {useCash, sell, buildFor, reserve, why, whySell, whyBuy}
+ * reserve = 不能动的现金（staged 未投完本金），买入只能花「现金 − reserve」。
+ */
+function rebalanceStep(st, env, date, list, opt) {
+  const { px, wOf, totalW, active } = env;
+  if (!list.length || totalW <= 0) return;
+  const eff = effectiveWeights(active, wOf, list);
+  const prices = new Map();
+  for (const c of list) prices.set(c, px(c, date) || 0);
+  let stock = 0;
+  for (const c of list) stock += (st.sh.get(c) || 0) * (prices.get(c) || 0);
+  const T = opt.useCash ? st.cash + stock : stock;
+  const stockTarget = T * (totalW / 100);
+  // 1) 卖出超配（分红复投不卖）
+  if (opt.sell !== false) {
+    for (const c of list) {
+      const p = prices.get(c) || 0;
+      if (!(p > 0)) continue;
+      const target = stockTarget * eff.get(c) / totalW;
+      const cur = (st.sh.get(c) || 0) * p;
+      if (cur > target + p * 100) {
+        const n = Math.floor((cur - target) / p / 100) * 100;
+        if (n > 0) {
+          st.sh.set(c, st.sh.get(c) - n);
+          st.cash += n * p;
+          st.events.push({ date, type: '卖出', code: c, shares: n, price: p, why: opt.whySell });
+        }
+      }
+    }
+  }
+  // 2) 买入低配（缺口大的先买）；分批模式下只能花「现金 − 未投本金」
+  const gaps = [];
+  for (const c of list) {
+    const p = prices.get(c) || 0;
+    if (!(p > 0)) continue;
+    const target = stockTarget * eff.get(c) / totalW;
+    const cur = (st.sh.get(c) || 0) * p;
+    if (target - cur > 0) gaps.push({ c, p, gap: target - cur });
+  }
+  gaps.sort((a, b) => b.gap - a.gap);
+  for (const g of gaps) {
+    const avail = opt.reserve > 0 ? Math.max(0, st.cash - opt.reserve) : st.cash;
+    const n = Math.floor(Math.min(avail, g.gap) / g.p / 100) * 100;
+    if (n <= 0) continue;
+    st.sh.set(g.c, (st.sh.get(g.c) || 0) + n);
+    st.cash -= n * g.p;
+    const isBuild = opt.buildFor && opt.buildFor.has(g.c);
+    st.events.push({ date, type: '买入', code: g.c, shares: n, price: g.p, why: isBuild ? opt.whyBuy : (opt.why || '结构再平衡') });
+  }
+}
+
+/**
+ * 一期买入：把预算按有效权重补到目标 base（元），只买不卖、100 股整手、剩余留现金。
+ * base = 当前持仓市值 + 本期预算（分期建仓）/ + 可复投现金×股票占比（分红复投）。
+ * @returns {number} 实际花费
+ */
+function stagedBuyTo(st, env, date, shares, budget, base, why, record) {
+  const { px, wOf, totalW, active, buildable } = env;
+  if (!(budget > 0) || totalW <= 0) return 0;
+  const list = active.filter((c) => buildable(c, date));
+  if (!list.length) return 0;
+  const eff = effectiveWeights(active, wOf, list);
+  const gaps = [];
+  for (const c of list) {
+    const p = px(c, date) || 0;
+    if (!(p > 0)) continue;
+    const target = base * (eff.get(c) || 0) / totalW;
+    const cur = (shares.get(c) || 0) * p;
+    if (target - cur > 0) gaps.push({ c, p, gap: target - cur });
+  }
+  gaps.sort((a, b) => b.gap - a.gap);
+  let left = budget;
+  let spent = 0;
+  for (const g of gaps) {
+    const n = Math.floor(Math.min(left, g.gap) / g.p / 100) * 100;
+    if (n <= 0) continue;
+    shares.set(g.c, (shares.get(g.c) || 0) + n);
+    const cost = n * g.p;
+    spent += cost;
+    left -= cost;
+    if (record) st.events.push({ date, type: '买入', code: g.c, shares: n, price: g.p, why });
+  }
+  return spent;
+}
+
+/**
+ * 已知最近年度每股分红（元/股）：Y 年 1–3 月看 Y-2 年度，4–12 月看 Y-1 年度。
+ * 只影响「股息率估算」，入账一律看 data/div 的 ev 除权日。
+ */
+function knownDps(dividends, code, date) {
+  const years = dividends?.[code]?.years;
+  if (!years) return 0;
+  const y = Number(date.slice(0, 4));
+  const m = Number(date.slice(5, 7));
+  const v = years[m >= 4 ? y - 1 : y - 2];
+  return v > 0 ? v : 0;
+}
+
+/**
+ * 股息率触发的买入：只有「DPS ÷ 当日价 × 100 ≥ minDy」才买，只买不卖、100 股整手。
+ * 不摊未上市份额、不做等权再平衡（与 once/staged 口径不同）。
+ * opt: {record, budget}——不复投口径的 budget 只用本金。
+ * @returns {{cash:number, spent:number}}
+ */
+function dipBuyTo(st, env, date, shares, cashNow, opt = {}) {
+  const { px, wOf, totalW, active, dividends, e } = env;
+  const record = opt.record !== false;
+  const budget = opt.budget == null ? Infinity : opt.budget;
+  let cashLeft = cashNow;
+  let spent = 0;
+  if (totalW <= 0) return { cash: cashLeft, spent };
+  const stock = positionValue(shares, active, px, date);
+  const T = cashLeft + stock; // 目标 = 当前总资产 × w/100
+  const gaps = [];
+  for (const c of active) {
+    const p = px(c, date) || 0;
+    if (!(p > 0)) continue;
+    const dps = knownDps(dividends, c, date);
+    if (!(dps > 0)) continue;
+    const dy = (dps / p) * 100;
+    if (!(dy >= e.minDy)) continue;
+    // 触发口径：股息率达到门槛（哪怕整手取整后买不到也算触发）
+    if (record && !st.dipTriggered.has(c)) st.dipTriggered.set(c, date);
+    const target = T * (wOf.get(c) || 0) / 100;
+    const cur = (shares.get(c) || 0) * p;
+    if (target - cur > 0) gaps.push({ c, p, dy, gap: target - cur });
+  }
+  gaps.sort((a, b) => b.gap - a.gap);
+  for (const g of gaps) {
+    const room = Math.min(cashLeft, Math.max(0, budget - spent), g.gap);
+    const n = Math.floor(room / g.p / 100) * 100;
+    if (n <= 0) continue;
+    shares.set(g.c, (shares.get(g.c) || 0) + n);
+    const cost = n * g.p;
+    cashLeft -= cost;
+    spent += cost;
+    if (record) st.events.push({ date, type: '买入', code: g.c, shares: n, price: g.p, why: `股息率 ${g.dy.toFixed(1)}% ≥ ${e.minDy}% 建仓` });
+  }
+  return { cash: cashLeft, spent };
+}
+
+/** 当日净值记账：两条净值 + 单位净值（TWR）+ 按股票细分的持仓表。 */
+function recordDay(st, env, date, extIn) {
+  const v = st.cash + positionValue(st.sh, env.active, env.px, date);
+  const vR = st.cashR + positionValue(st.shR, env.active, env.px, date);
+  st.nav.push([date, v]);
+  st.navR.push([date, vR]);
+  const a = stepUnits(st.units, v, extIn);
+  st.units = a.units;
+  st.unitNav.push([date, a.unitNav]);
+  st.divPU.push([date, st.cumDivPU]);
+  const b = stepUnits(st.unitsR, vR, extIn);
+  st.unitsR = b.units;
+  st.unitNavR.push([date, b.unitNav]);
+  const compRow = { cash: +st.cash.toFixed(2) };
+  for (const c of env.active) {
+    const n = st.sh.get(c) || 0;
+    if (n <= 0) continue;
+    const p = env.px(c, date);
+    if (p > 0) compRow[c] = +(n * p).toFixed(2);
+  }
+  st.comp.push([date, compRow]);
+}
+
+/**
+ * 区间内新上市的股票：上市满 delay 后做一次结构再平衡把它买回来。
+ * dip 不做未上市再平衡；staged 保留，但钱只能来自「现金 − 未投本金」。
+ * @returns {string[]} 更新后的已建仓集合
+ */
+function stepNewListings(st, env, date, built) {
+  const { active, buildable, wOf, px, isDip, isStaged, buildDelayMonths } = env;
+  if (isDip) return built;
+  const newly = active.filter((c) => !built.includes(c) && buildable(c, date));
+  if (!newly.length) return built;
+  const next = built.concat(newly);
+  const list = active.filter((c) => buildable(c, date));
+  rebalanceStep(st, env, date, list, {
+    useCash: true,
+    buildFor: new Set(newly),
+    reserve: isStaged ? st.reserved : 0,
+    whySell: `为 ${newly.map((c) => c).join('/')} 建仓调整（卖出）`,
+    whyBuy: `上市满 ${buildDelayMonths} 个月建仓（初始份额 × 组合期间增长）`,
+  });
+  for (const c of newly) {
+    st.builds.push({ code: c, date, listing: st.listingOf.get(c), targetWeight: wOf.get(c) || 0, shares: st.sh.get(c) || 0, price: px(c, date) || null });
+  }
+  return next;
+}
+
+/**
+ * 到期末还没建仓的股票。once/staged 用 pending 的统一语义（未上市/未到建仓日/无数据）；
+ * dip 的 pending 只表示无行情或未上市，有行情但没触发门槛的另列 neverTriggered。
+ */
+function settlePending(st, env, dates, built) {
+  const { active, wOf, isDip } = env;
+  const lastDate = dates[dates.length - 1];
+  if (isDip) {
+    const pending = active.filter((c) => !st.listingOf.get(c) || st.listingOf.get(c) > lastDate).map((c) => ({
+      code: c, weight: wOf.get(c) || 0, listing: st.listingOf.get(c), buildDate: null,
+      reason: !st.listingOf.get(c) ? '无行情数据' : '区间内未上市',
+    }));
+    const pendingSet = new Set(pending.map((p) => p.code));
+    st.entryOut.neverTriggered = active.filter((c) => !st.dipTriggered.has(c) && !pendingSet.has(c));
+    st.entryOut.triggered = Object.fromEntries(st.dipTriggered);
+    return pending;
+  }
+  return active.filter((c) => !built.includes(c)).map((c) => ({
+    code: c, weight: wOf.get(c) || 0, listing: st.listingOf.get(c), buildDate: st.buildAt.get(c),
+    reason: !st.listingOf.get(c) ? '无行情数据' : (st.buildAt.get(c) > lastDate ? '区间内未到建仓日' : '区间内未上市'),
+  }));
+}
+
+/**
+ * 起点建仓：once 一次买齐；staged 只投第 1 期；dip 起点按股息率门槛判断。
+ * 返回起点可买集合——主循环判断「新上市」时要和它比。
+ */
+function initialBuild(st, env, dates) {
+  const { active, buildable, px, wOf, totalW, capital, isStaged, isDip, months, perPeriod } = env;
+  const d0 = dates[0];
+  const built = active.filter((c) => buildable(c, d0));
+  const valueOf = (shares) => positionValue(shares, active, px, d0);
+  if (isStaged) {
+    st.stagedDone = 1;
+    st.reserved = perPeriod * (months - 1); // 剩下 months-1 期的本金必须留着
+    if (perPeriod > 0) {
+      const budget = Math.min(perPeriod, Math.max(0, st.cash - st.reserved));
+      const spent = stagedBuyTo(st, env, d0, st.sh, budget, valueOf(st.sh) + budget, `分批建仓 1/${months} 期`, true);
+      st.cash -= spent;
+      st.entryOut.installments.push({ date: d0, amount: spent });
+      // 不复投口径：同样的期数/预算，但分红不进股票（与 once 的初始建仓口径一致）
+      const spentR = stagedBuyTo(st, env, d0, st.shR, budget, valueOf(st.shR) + budget, `分批建仓 1/${months} 期`, false);
+      st.cashR -= spentR;
+    }
+  } else if (isDip) {
+    // dip：起点先按门槛试一次
+    const n0 = dipBuyTo(st, env, d0, st.sh, st.cash);
+    st.cash = n0.cash;
+    const r0 = dipBuyTo(st, env, d0, st.shR, st.cashR, { record: false, budget: st.dipPrincipalR });
+    st.cashR = r0.cash;
+    st.dipPrincipalR -= r0.spent;
+  } else if (built.length) {
+    const eff = effectiveWeights(active, wOf, built);
+    const stockTarget = capital * (totalW / 100);
+    let spent = 0;
+    for (const c of built) {
+      const p = px(c, d0) || 0;
+      if (!(p > 0)) continue;
+      const target = stockTarget * eff.get(c) / totalW;
+      const n = Math.floor(target / p / 100) * 100;
+      if (n > 0) {
+        st.sh.set(c, n);
+        st.shR.set(c, n);
+        st.events.push({ date: d0, type: '买入', code: c, shares: n, price: p, why: '初始建仓' });
+        spent += n * p;
+      }
+    }
+    // 权重已在入口归一化（合计 ≤100），整手向下取整后不会超过本金；Math.max 兜底浮点误差
+    st.cash = Math.max(0, capital - spent);
+    st.cashR = st.cash;
+  }
+  return built;
+}
+
+/** 当日分红到账：按各自除权除息日入账；没有 ev 的股票整段不计（记进 divMissing）。 */
+function stepDividends(st, env, date, y) {
+  let paid = 0;
+  const payTo = (c, dps) => {
+    if (!(dps > 0)) return;
+    const n = st.sh.get(c) || 0;
+    if (n > 0) {
+      const amt = n * dps;
+      st.cash += amt;
+      paid += amt;
+      // 单位净值口径的分红：每份净值收到多少。追加过的账户按金额算会被稀释
+      if (st.units > 0) st.cumDivPU += amt / st.units;
+      st.divByCode[c] = (st.divByCode[c] || 0) + amt;
+    }
+    const nR = st.shR.get(c) || 0;
+    if (nR > 0) st.cashR += nR * dps;
+  };
+  for (const c of env.active) {
+    const evs = env.dividends?.[c]?.ev;
+    if (!Array.isArray(evs) || !evs.length) {
+      // 没有派息明细 = 这只股票在回测里完全不派息。不猜日期、不编「4 月末」。
+      st.divMissing.add(c);
+      continue;
+    }
+    let ptr = st.evPtr.get(c);
+    if (ptr === undefined) {
+      // 第一次遇到这只股票：建仓日之前的分红不算
+      ptr = 0;
+      while (ptr < evs.length && evs[ptr][0] <= date) ptr++;
+      st.evPtr.set(c, ptr);
+      continue;
+    }
+    while (ptr < evs.length && evs[ptr][0] <= date) {
+      payTo(c, evs[ptr][1]);
+      ptr++;
+    }
+    st.evPtr.set(c, ptr);
+  }
+  if (paid > 0) {
+    st.divByY[y] = (st.divByY[y] || 0) + paid;
+    st.yearDiv += paid;
+    st.events.push({ date, type: '分红', amount: paid, why: '除权除息日分红到账' });
+  }
+  return paid;
+}
+
 /* ============================ 投入模型 ============================ */
 
 function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capital, monthlyAdd, from, to, buildDelayMonths, entry }) {
@@ -293,280 +634,50 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
   const dipTriggered = new Map(); // dip：code → 首次满足股息率门槛的日期
   let dipPrincipalR = isDip ? capital : 0; // 不复投口径：dip 只用本金买、分红不参与
 
-  const stockValue = (date) => {
-    let v = 0;
-    for (const c of active) {
-      const n = sh.get(c) || 0;
-      if (n <= 0) continue;
-      const p = px(c, date);
-      if (p > 0) v += n * p;
-    }
-    return v;
-  };
-  const stockValueR = (date) => {
-    let v = 0;
-    for (const c of active) {
-      const n = shR.get(c) || 0;
-      if (n <= 0) continue;
-      const p = px(c, date);
-      if (p > 0) v += n * p;
-    }
-    return v;
-  };
-
-  /** 有效权重：未建仓股票的目标份额，平均摊给当前可买的股票 */
-  const effWeights = (list) => {
-    const set = new Set(list);
-    let unbuildW = 0;
-    for (const c of active) if (!set.has(c)) unbuildW += wOf.get(c) || 0;
-    const n = list.length;
-    const m = new Map();
-    for (const c of list) m.set(c, (wOf.get(c) || 0) + (n ? unbuildW / n : 0));
-    return m;
-  };
-
-  /**
-   * 结构再平衡：把股票部分调回目标权重。
-   * @param {object} opt {useCash:boolean, buildFor:Set, reserve:number, whySell:string, whyBuy:string}
-   *   reserve：不能动的现金（staged 未投完本金），买入只能花「现金 − reserve」
-   */
-  const rebalance = (date, list, opt) => {
-    if (!list.length || totalW <= 0) return;
-    const eff = effWeights(list);
-    const prices = new Map();
-    for (const c of list) prices.set(c, px(c, date) || 0);
-    let stock = 0;
-    for (const c of list) stock += (sh.get(c) || 0) * (prices.get(c) || 0);
-    const T = opt.useCash ? cash + stock : stock;
-    const stockTarget = T * (totalW / 100);
-    // 1) 卖出超配
-    for (const c of list) {
-      const p = prices.get(c) || 0;
-      if (!(p > 0)) continue;
-      const target = stockTarget * eff.get(c) / totalW;
-      const cur = (sh.get(c) || 0) * p;
-      if (cur > target + p * 100) {
-        const n = Math.floor((cur - target) / p / 100) * 100;
-        if (n > 0) {
-          sh.set(c, sh.get(c) - n);
-          cash += n * p;
-          events.push({ date, type: '卖出', code: c, shares: n, price: p, why: opt.whySell });
-        }
-      }
-    }
-    // 2) 买入低配（缺口大的先买）；分批模式下只能花「现金 − 未投本金」
-    const gaps = [];
-    for (const c of list) {
-      const p = prices.get(c) || 0;
-      if (!(p > 0)) continue;
-      const target = stockTarget * eff.get(c) / totalW;
-      const cur = (sh.get(c) || 0) * p;
-      if (target - cur > 0) gaps.push({ c, p, gap: target - cur });
-    }
-    gaps.sort((a, b) => b.gap - a.gap);
-    for (const g of gaps) {
-      const avail = opt.reserve > 0 ? Math.max(0, cash - opt.reserve) : cash;
-      const n = Math.floor(Math.min(avail, g.gap) / g.p / 100) * 100;
-      if (n <= 0) continue;
-      sh.set(g.c, (sh.get(g.c) || 0) + n);
-      cash -= n * g.p;
-      const isBuild = opt.buildFor && opt.buildFor.has(g.c);
-      events.push({ date, type: '买入', code: g.c, shares: n, price: g.p, why: isBuild ? opt.whyBuy : '结构再平衡' });
-    }
-  };
-
-  /** 分红复投 / 月追加后的买入：只买不卖，按有效权重补缺口 */
-  const investCash = (date) => {
-    const list = active.filter((c) => buildable(c, date));
-    if (!list.length || totalW <= 0) return;
-    const eff = effWeights(list);
-    let stock = 0;
-    for (const c of list) stock += (sh.get(c) || 0) * (px(c, date) || 0);
-    const T = cash + stock;
-    const stockTarget = T * (totalW / 100);
-    const gaps = [];
-    for (const c of list) {
-      const p = px(c, date) || 0;
-      if (!(p > 0)) continue;
-      const target = stockTarget * eff.get(c) / totalW;
-      const cur = (sh.get(c) || 0) * p;
-      if (target - cur > 0) gaps.push({ c, p, gap: target - cur });
-    }
-    gaps.sort((a, b) => b.gap - a.gap);
-    for (const g of gaps) {
-      const n = Math.floor(Math.min(cash, g.gap) / g.p / 100) * 100;
-      if (n <= 0) continue;
-      sh.set(g.c, (sh.get(g.c) || 0) + n);
-      cash -= n * g.p;
-      events.push({ date, type: '买入', code: g.c, shares: n, price: g.p, why: '分红复投' });
-    }
-  };
-
-  /* ---------------- 分批建仓（staged） ---------------- */
-
-  /**
-   * 分批建仓 / 分红复投的一期买入：把预算 budget 按「有效权重」补到目标 base（元）。
-   * base 的取法：
-   *  - 分期建仓：base = 当前持仓市值 + 本期预算（这期钱投进去后持仓该有的样子）→ 每期只补缺口；
-   *  - 分红复投：base = 当前持仓市值 + 可复投现金 × 目标股票比例（保持现金仓位不变）。
-   * 未上市股票的份额按现有规则摊给当时可买的股票（同一套 effWeights）。
-   * 只买不卖、100 股整手、剩余留现金。
-   * @param {Map<string,number>} shares 持仓股数（sh 或 shR）
-   * @param {number} budget 最多花多少现金
-   * @param {number} base 目标持仓市值（元）
-   * @param {string} why 事件原因
-   * @param {boolean} record 是否记 events / 建仓流水
-   * @returns {number} 实际花费
-   */
-  const stagedBuyTo = (date, shares, budget, base, why, record) => {
-    if (!(budget > 0) || totalW <= 0) return 0;
-    const list = active.filter((c) => buildable(c, date));
-    if (!list.length) return 0;
-    const eff = effWeights(list);
-    const gaps = [];
-    for (const c of list) {
-      const p = px(c, date) || 0;
-      if (!(p > 0)) continue;
-      const target = base * (eff.get(c) || 0) / totalW;
-      const cur = (shares.get(c) || 0) * p;
-      if (target - cur > 0) gaps.push({ c, p, gap: target - cur });
-    }
-    gaps.sort((a, b) => b.gap - a.gap);
-    let left = budget;
-    let spent = 0;
-    for (const g of gaps) {
-      const n = Math.floor(Math.min(left, g.gap) / g.p / 100) * 100;
-      if (n <= 0) continue;
-      shares.set(g.c, (shares.get(g.c) || 0) + n);
-      const cost = n * g.p;
-      spent += cost;
-      left -= cost;
-      if (record) events.push({ date, type: '买入', code: g.c, shares: n, price: g.p, why });
-    }
-    return spent;
-  };
-
-  /* ---------------- 股息率触发（dip） ---------------- */
-
-  /**
-   * 已知最近年度每股分红（元/股）：
-   * 年报分红一般次年 4 月后到账，所以 Y 年 1–3 月只能看 Y-2 年度，4–12 月看 Y-1 年度。
-   * 注意：这只影响「股息率估算」，跟分红入账无关——入账一律看 data/div 的 ev 除权日。
-   */
-  const knownDps = (code, date) => {
-    const years = dividends?.[code]?.years;
-    if (!years) return 0;
-    const y = Number(date.slice(0, 4));
-    const m = Number(date.slice(5, 7));
-    const v = years[m >= 4 ? y - 1 : y - 2];
-    return v > 0 ? v : 0;
-  };
-
-  /**
-   * 股息率触发的买入：只有「已知 DPS ÷ 当日价 × 100 ≥ minDy」才买，
-   * 按目标权重（当前总资产 × w%）补到目标，只买不卖、100 股整手；
-   * 没触发（含无分红历史）的股票一直留现金。
-   * 不摊未上市份额、不做等权再平衡（与 once/staged 的口径不同）。
-   * @param {Map<string,number>} shares 持仓股数（sh 或 shR）
-   * @param {number} cashNow 当前现金
-   * @param {object} [opt] {record:boolean 记录触发/事件, budget:number 最多花多少（不复投口径只用本金）}
-   * @returns {{cash:number, spent:number}}
-   */
-  const dipBuyTo = (date, shares, cashNow, opt = {}) => {
-    const record = opt.record !== false;
-    const budget = opt.budget == null ? Infinity : opt.budget;
-    let cashLeft = cashNow;
-    let spent = 0;
-    if (totalW <= 0) return { cash: cashLeft, spent };
-    let stock = 0;
-    for (const c of active) {
-      const n = shares.get(c) || 0;
-      if (n <= 0) continue;
-      const p = px(c, date);
-      if (p > 0) stock += n * p;
-    }
-    const T = cashLeft + stock; // 目标 = 当前总资产 × w/100
-    const gaps = [];
-    for (const c of active) {
-      const p = px(c, date) || 0;
-      if (!(p > 0)) continue;
-      const dps = knownDps(c, date);
-      if (!(dps > 0)) continue;
-      const dy = (dps / p) * 100;
-      if (!(dy >= e.minDy)) continue;
-      // 触发口径：股息率达到门槛（哪怕整手取整后买不到也算触发）
-      if (record && !dipTriggered.has(c)) dipTriggered.set(c, date);
-      const target = T * (wOf.get(c) || 0) / 100;
-      const cur = (shares.get(c) || 0) * p;
-      if (target - cur > 0) gaps.push({ c, p, dy, gap: target - cur });
-    }
-    gaps.sort((a, b) => b.gap - a.gap);
-    for (const g of gaps) {
-      const room = Math.min(cashLeft, Math.max(0, budget - spent), g.gap);
-      const n = Math.floor(room / g.p / 100) * 100;
-      if (n <= 0) continue;
-      shares.set(g.c, (shares.get(g.c) || 0) + n);
-      const cost = n * g.p;
-      cashLeft -= cost;
-      spent += cost;
-      if (record) events.push({ date, type: '买入', code: g.c, shares: n, price: g.p, why: `股息率 ${g.dy.toFixed(1)}% ≥ ${e.minDy}% 建仓` });
-    }
-    return { cash: cashLeft, spent };
-  };
-
-  // 起点：可买集合（上市满 delay 的股票）；未上市份额摊给它们
-  let built = active.filter((c) => buildable(c, dates[0]));
-  // 初始建仓：once 一次买齐；staged 只投第 1 期；dip 起点按股息率门槛判断
-  if (isStaged) {
-    stagedDone = 1;
-    reserved = perPeriod * (months - 1); // 剩下 months-1 期的本金必须留着
-    if (perPeriod > 0) {
-      const budget = Math.min(perPeriod, Math.max(0, cash - reserved));
-      const spent = stagedBuyTo(dates[0], sh, budget, stockValue(dates[0]) + budget, `分批建仓 1/${months} 期`, true);
-      cash -= spent;
-      entryOut.installments.push({ date: dates[0], amount: spent });
-      // 不复投口径：同样的期数/预算，但分红不进股票（与 once 的初始建仓口径一致）
-      const spentR = stagedBuyTo(dates[0], shR, budget, stockValueR(dates[0]) + budget, `分批建仓 1/${months} 期`, false);
-      cashR -= spentR;
-    }
-  } else if (isDip) {
-    // dip：起点先按门槛试一次
-    const n0 = dipBuyTo(dates[0], sh, cash);
-    cash = n0.cash;
-    const r0 = dipBuyTo(dates[0], shR, cashR, { record: false, budget: dipPrincipalR });
-    cashR = r0.cash;
-    dipPrincipalR -= r0.spent;
-  } else if (built.length) {
-    const eff = effWeights(built);
-    const T = capital;
-    const stockTarget = T * (totalW / 100);
-    const gaps = [];
-    for (const c of built) {
-      const p = px(c, dates[0]) || 0;
-      if (!(p > 0)) continue;
-      const target = stockTarget * eff.get(c) / totalW;
-      const n = Math.floor(target / p / 100) * 100;
-      if (n > 0) {
-        sh.set(c, n);
-        shR.set(c, n);
-        events.push({ date: dates[0], type: '买入', code: c, shares: n, price: p, why: '初始建仓' });
-        gaps.push(n * p);
-      }
-    }
-    // 权重已在入口归一化（合计 ≤100），整手向下取整后不会超过本金；Math.max 兜底浮点误差
-    cash = Math.max(0, capital - gaps.reduce((a, b) => a + b, 0));
-    cashR = cash;
-  }
+  const stockValue = (date) => positionValue(sh, active, px, date);
+  const stockValueR = (date) => positionValue(shR, active, px, date);
 
   let lastYear = null;
   let yearNav0 = capital;
   let yearDiv = 0;
   let yearAdds = 0;
   let yearCash = null;
+
   /* 每只股票的分红事件指针：按「真实除权除息日」逐笔到账，不再假设每年 4 月末统一发。
      ev 缺的股票在回测里完全不派息，并记进 divMissing 让页面说清楚。 */
   const evPtr = new Map();
   const divMissing = new Set();
+
+  /* 零件函数的两个入口：st 是可变状态，env 是不变量。
+     cash / cashR / units / cumDivPU / yearDiv 是 runInvest 顶层的 let，
+     这里用访问器代理过去——否则零件改了 st.cash、主循环还在读自己的 cash，两边会分裂。 */
+  const st = {
+    sh, shR, events, dipTriggered, divByCode, divByY, evPtr, divMissing,
+    nav, navR, comp, unitNav, unitNavR, divPU, entryOut, builds, listingOf, buildAt,
+    get cash() { return cash; },
+    set cash(v) { cash = v; },
+    get cashR() { return cashR; },
+    set cashR(v) { cashR = v; },
+    get units() { return units; },
+    set units(v) { units = v; },
+    get unitsR() { return unitsR; },
+    set unitsR(v) { unitsR = v; },
+    get cumDivPU() { return cumDivPU; },
+    set cumDivPU(v) { cumDivPU = v; },
+    get yearDiv() { return yearDiv; },
+    set yearDiv(v) { yearDiv = v; },
+    get stagedDone() { return stagedDone; },
+    set stagedDone(v) { stagedDone = v; },
+    get reserved() { return reserved; },
+    set reserved(v) { reserved = v; },
+    get dipPrincipalR() { return dipPrincipalR; },
+    set dipPrincipalR(v) { dipPrincipalR = v; },
+  };
+  const env = { active, wOf, totalW, px, buildable, dividends, e, capital, isStaged, isDip, months, perPeriod, stockCapital, designatedCash, buildDelayMonths };
+
+
+  // 起点：可买集合（上市满 delay 的股票）；未上市份额摊给它们；随后按模式做初始建仓
+  let built = initialBuild(st, env, dates);
 
   for (let i = 0; i < dates.length; i++) {
     const date = dates[i];
@@ -590,50 +701,7 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
       if (cashR > 0) cashR *= 1 + CASH_DAY_RATE * days;
     }
 
-    // 分红到账：每笔按自己的除权除息日入账；没有 ev 的股票不计（进 divMissing）
-    {
-      let paid = 0;
-      const payTo = (c, dps, tag) => {
-        if (!(dps > 0)) return;
-        const n = sh.get(c) || 0;
-        if (n > 0) {
-          const amt = n * dps;
-          cash += amt;
-          paid += amt;
-          // 单位净值口径的分红：每份净值收到多少。追加过的账户按金额算会被稀释
-          if (units > 0) cumDivPU += amt / units;
-          divByCode[c] = (divByCode[c] || 0) + amt;
-        }
-        const nR = shR.get(c) || 0;
-        if (nR > 0) cashR += nR * dps;
-      };
-      for (const c of active) {
-        const evs = dividends?.[c]?.ev;
-        if (!Array.isArray(evs) || !evs.length) {
-          // 没有派息明细 = 这只股票在回测里完全不派息。不猜日期、不编「4 月末」。
-          divMissing.add(c);
-          continue;
-        }
-        let ptr = evPtr.get(c);
-        if (ptr === undefined) {
-          // 第一次遇到这只股票：建仓日之前的分红不算
-          ptr = 0;
-          while (ptr < evs.length && evs[ptr][0] <= date) ptr++;
-          evPtr.set(c, ptr);
-          continue;
-        }
-        while (ptr < evs.length && evs[ptr][0] <= date) {
-          payTo(c, evs[ptr][1]);
-          ptr++;
-        }
-        evPtr.set(c, ptr);
-      }
-      if (paid > 0) {
-        divByY[y] = (divByY[y] || 0) + paid;
-        yearDiv += paid;
-        events.push({ date, type: '分红', amount: paid, why: '除权除息日分红到账' });
-      }
-    }
+    stepDividends(st, env, date, y);
 
     // 月追加：4/12 月末各入 6 个月
     if (monthlyAdd > 0 && (isAprEnd || isDecEnd)) {
@@ -654,34 +722,16 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
       reserved = perPeriod * (months - stagedDone);
       const budget = Math.min(perPeriod, Math.max(0, cash - reserved));
       // 目标 = 当前持仓市值 + 本期预算：这一期的钱按有效权重补进去
-      const spent = stagedBuyTo(date, sh, budget, stockValue(date) + budget, `分批建仓 ${stagedDone}/${months} 期`, true);
+      const spent = stagedBuyTo(st, env, date, sh, budget, stockValue(date) + budget, `分批建仓 ${stagedDone}/${months} 期`, true);
       cash -= spent;
       entryOut.installments.push({ date, amount: spent });
       // 不复投口径：同样的期数/预算，但分红不进股票
       const budgetR = Math.min(perPeriod, Math.max(0, cashR - reserved));
-      const spentR = stagedBuyTo(date, shR, budgetR, stockValueR(date) + budgetR, `分批建仓 ${stagedDone}/${months} 期`, false);
+      const spentR = stagedBuyTo(st, env, date, shR, budgetR, stockValueR(date) + budgetR, `分批建仓 ${stagedDone}/${months} 期`, false);
       cashR -= spentR;
     }
 
-    // 是否有股票「上市满 delay」→ 做一次结构再平衡，把它的份额买回来
-    // dip 不做未上市再平衡；staged 保留，但这笔钱只能来自「现金 − 未投本金」
-    if (!isDip) {
-      const newly = active.filter((c) => !built.includes(c) && buildable(c, date));
-      if (newly.length) {
-        built = built.concat(newly);
-        const list = active.filter((c) => buildable(c, date));
-        rebalance(date, list, {
-          useCash: true,
-          buildFor: new Set(newly),
-          reserve: isStaged ? reserved : 0,
-          whySell: `为 ${newly.map((c) => c).join('/')} 建仓调整（卖出）`,
-          whyBuy: `上市满 ${buildDelayMonths} 个月建仓（初始份额 × 组合期间增长）`,
-        });
-        for (const c of newly) {
-          builds.push({ code: c, date, listing: listingOf.get(c), targetWeight: wOf.get(c) || 0, shares: sh.get(c) || 0, price: px(c, date) || null });
-        }
-      }
-    }
+    built = stepNewListings(st, env, date, built);
 
     // 分红复投 / 追加资金：
     //  - once：按当前总资产 × 目标权重补缺口（原有口径）
@@ -692,66 +742,35 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
       const free = Math.max(0, cash - reserved - designatedCash); // 分红/追加/利息 + 整手零头
       if (free > 0) {
         const addBase = free * (totalW / 100); // 按目标比例该进股票的部分
-        const spent = stagedBuyTo(date, sh, free, stockValue(date) + addBase, '分红复投', true);
+        const spent = stagedBuyTo(st, env, date, sh, free, stockValue(date) + addBase, '分红复投', true);
         cash -= spent;
       }
     } else if (!isDip && (isAprEnd || isDecEnd)) {
-      investCash(date);
+      rebalanceStep(st, env, date, active.filter((c) => buildable(c, date)), { useCash: true, sell: false, why: '分红复投' });
     }
 
     // dip：起点和每个月末检查股息率门槛；分红/追加的钱同样只有触发才买
     if (isDip && i > 0 && monthEndDay) {
-      const rb = dipBuyTo(date, sh, cash);
+      const rb = dipBuyTo(st, env, date, sh, cash);
       cash = rb.cash;
       // 不复投口径：dip 只用本金买、分红不参与（近似「同门槛但红利不复投」）
       if (dipPrincipalR > 0) {
-        const rr = dipBuyTo(date, shR, cashR, { record: false, budget: dipPrincipalR });
+        const rr = dipBuyTo(st, env, date, shR, cashR, { record: false, budget: dipPrincipalR });
         cashR = rr.cash;
         dipPrincipalR -= rr.spent;
       }
     }
 
     // 净值 = 现金（含 staged 未投本金）+ 持仓；预留本金只约束买入，不影响净值口径
-    const v = cash + stockValue(date);
-    const vR = cashR + stockValueR(date);
-    nav.push([date, v]);
-    navR.push([date, vR]);
-    { const s = stepUnits(units, v, extIn); units = s.units; unitNav.push([date, s.unitNav]); divPU.push([date, cumDivPU]); }
-    { const s = stepUnits(unitsR, vR, extIn); unitsR = s.units; unitNavR.push([date, s.unitNav]); }
-    const compRow = { cash: +cash.toFixed(2) };
-    for (const c of active) {
-      const n = sh.get(c) || 0;
-      if (n <= 0) continue;
-      const p = px(c, date);
-      if (p > 0) compRow[c] = +(n * p).toFixed(2);
-    }
-    comp.push([date, compRow]);
-    yearCash = cash;
+    recordDay(st, env, date, extIn);
+    yearCash = st.cash;
   }
 
   if (lastYear != null) {
     yearly.push({ year: lastYear, nav0: yearNav0, nav1: nav[nav.length - 1]?.[1] ?? null, div: yearDiv, cash: yearCash ?? 0, invest: yearAdds });
   }
 
-  // 到期末还没建仓的股票：
-  //  - once/staged：区间内未上市 / 未到建仓日 / 完全无数据（pending 原有语义）
-  //  - dip：pending 只表示「无行情 / 区间内没上市」；有行情但全程没触发门槛的单独列 neverTriggered
-  const lastDate = dates[dates.length - 1];
-  let pending;
-  if (isDip) {
-    pending = active.filter((c) => !listingOf.get(c) || listingOf.get(c) > lastDate).map((c) => ({
-      code: c, weight: wOf.get(c) || 0, listing: listingOf.get(c), buildDate: null,
-      reason: !listingOf.get(c) ? '无行情数据' : '区间内未上市',
-    }));
-    const pendingSet = new Set(pending.map((p) => p.code));
-    entryOut.neverTriggered = active.filter((c) => !dipTriggered.has(c) && !pendingSet.has(c));
-    entryOut.triggered = Object.fromEntries(dipTriggered);
-  } else {
-    pending = active.filter((c) => !built.includes(c)).map((c) => ({
-      code: c, weight: wOf.get(c) || 0, listing: listingOf.get(c), buildDate: buildAt.get(c),
-      reason: !listingOf.get(c) ? '无行情数据' : (buildAt.get(c) > lastDate ? '区间内未到建仓日' : '区间内未上市'),
-    }));
-  }
+  const pending = settlePending(st, env, dates, built);
 
   return {
     nav, navR, unitNav, unitNavR, divPU, comp, yearly, events, divByY, divByCode, builds, pending,
@@ -792,16 +811,7 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
   const flowsN = [[dates[0], -cash0]];
   const flowsR = [[dates[0], -cash0]];
   const codesAll = [...new Set([...codes, ...base.keys()])].filter((c) => (base.get(c) || 0) > 0);
-  const valueAt = (date, shares) => {
-    let v = 0;
-    for (const c of codesAll) {
-      const n = shares.get(c) || 0;
-      if (n <= 0) continue;
-      const p = px(c, date);
-      if (p > 0) v += n * p;
-    }
-    return v;
-  };
+  const valueAt = (date, shares) => positionValue(shares, codesAll, px, date);
   const initValue = cash0 + valueAt(dates[0], shN);
   let lastYear = null;
   let yearNav0 = initValue;

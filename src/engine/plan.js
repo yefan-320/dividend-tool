@@ -105,15 +105,6 @@ export function planStockAmount(plan) {
 }
 
 /** 每只股票的目标金额（元） */
-export function planTargets(plan) {
-  const capital = Math.max(0, Number(plan?.capital) || 0);
-  return (plan?.holdings || []).map((h) => ({
-    code: h.code,
-    weight: Number(h.weight) || 0,
-    amount: capital * (Number(h.weight) || 0) / 100,
-  }));
-}
-
 /** 权重保留 1 位小数（够用且不会出现 100.1% 这种合计） */
 export function roundWeights(holdings, decimals = 1) {
   const f = 10 ** decimals;
