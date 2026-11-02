@@ -39,3 +39,5 @@ jobs:
           node tools/check-ui-state.mjs
           node tools/check-ios.mjs
           node tools/check-offline.mjs
+          # 放最后：它会清空站点数据（模拟全新安装），前面那些检查的状态不必留着
+          node tools/check-offline-boot.mjs
