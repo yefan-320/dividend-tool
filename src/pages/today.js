@@ -103,10 +103,12 @@ function decisionRow(c) {
 }
 
 function decisionsPanel(cands) {
+  const shownBuy = cands.top.filter((x) => x.level === 'buy').length;
   return `<section class="panel decision-panel fade-in">
     <div class="panel-head">
       <span class="panel-title">今天做什么</span>
       <span class="section-note">全市场 ${cands.counts.total} 只候选 · 财报覆盖 ${Object.keys(db.finance || {}).length} 只</span>
+      ${cands.counts.buy > shownBuy ? `<a class="section-more" href="#scan">这里只列前 ${shownBuy} 只，全部 ${cands.counts.buy} 只可买 →</a>` : ''}
     </div>
     <div class="decision-list">${cands.top.map(decisionRow).join('') || '<div class="banner">没有满足条件的候选</div>'}</div>
   </section>`;

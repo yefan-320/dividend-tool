@@ -8,7 +8,6 @@ import { applyTableLayout, refreshTableHints } from './ui/table.js';
 import { loadCore, db, applyQuoteCache, refreshQuotes } from './data.js';
 import { loadSettings } from './store.js';
 import { toast } from './ui/toast.js';
-import { ensureEcharts } from './charts.js';
 import { closeModal } from './ui/modal.js';
 import { primeNameIndex } from './ui/stockSearch.js';
 
@@ -21,7 +20,7 @@ const PAGES = [
 ];
 
 /** 版本号：发版时跟 sw.js 的 SHELL_CACHE、package.json 一起升 */
-const APP_VERSION = '1.6.1';
+const APP_VERSION = '1.8.0';
 
 const app = document.getElementById('app');
 const sidebar = document.getElementById('sidebar');
@@ -190,6 +189,9 @@ function setQuoteStatus(text) {
 }
 
 let refreshing = false;
+/** 需要「实时价刷全市场」的页面：只有它们要遍历全池算候选。其余页用本地快照。 */
+const autoQuotePages = new Set(['today', 'scan']);
+
 async function refreshQuotesInBackground() {
   if (refreshing) return { ok: false };
   refreshing = true;
@@ -220,10 +222,8 @@ async function boot() {
   renderSidebar(bootId);
   renderTabbar(bootId);
   app.innerHTML = skeleton();
-  // 图表库 338KB，和数据并行下；不 await，谁先到都不耽误
-  ensureEcharts().catch(() => {});
-  // 搜索索引 58KB：空闲时补，等用户真打字的时候名字已经在内存里
-  primeNameIndex();
+  // 搜索索引 58KB：等首屏数据落地了再补，不和核心数据抢带宽
+  setTimeout(() => primeNameIndex(), 3000);
   try {
     await loadCore();
     performance.mark?.('d3-core-done');
@@ -236,21 +236,28 @@ async function boot() {
   try { await applyQuoteCache(); } catch (e) {}
   await renderPage();
   performance.mark?.('d3-first-render');
-  // 首屏之后后台刷新全市场行情（失败不影响页面）
-  setTimeout(() => { refreshQuotesInBackground(); }, 500);
+  // 首屏之后后台刷新全市场行情。
+  //
+  // ⚠ 只在「今天 / 选股」两个真要遍历全市场的页面刷：那是 5552 只、约 1.26MB，
+  // 慢网下一开就把带宽吃光，别的页面（回测 / 组合对比）的数据全排它后面——
+  // 组合对比在手机上打不开，一半是这个原因。其它页用本地快照，够用。
+  if (autoQuotePages.has(currentId())) setTimeout(() => { refreshQuotesInBackground(); }, 800);
   warmChartsCache();
 }
 
-/** 让 SW 在空闲时补下图表库（离线画图用）；省流量模式/2G 不补，画图时再按需加载 */
+/** 让 SW 用空闲时间补下图表库（离线画图用）；省流量/2G/3G 不补，画图时再按需加载。
+    首屏后 10 秒才动：那 327KB 在慢网上一开下，页面自己的数据就得排队。 */
 function warmChartsCache() {
   try {
     const conn = navigator.connection || {};
-    if (conn.saveData || /^(slow-)?2g$/.test(conn.effectiveType || '')) return;
+    if (conn.saveData || /^(slow-)?[23]g$/.test(conn.effectiveType || '')) return;
     const post = () => {
       try { navigator.serviceWorker?.controller?.postMessage({ type: 'warm-charts' }); } catch (e) {}
     };
-    const idle = () => (window.requestIdleCallback ? window.requestIdleCallback(post, { timeout: 4000 }) : setTimeout(post, 1500));
-    navigator.serviceWorker?.ready.then(idle, () => {});
+    setTimeout(() => {
+      if (window.requestIdleCallback) window.requestIdleCallback(post, { timeout: 6000 });
+      else post();
+    }, 10000);
   } catch (e) { /* 不支持就只走按需加载 */ }
 }
 

@@ -224,7 +224,18 @@ function scanView() {
   const all = baseUniverse();
   const u = scanState.levelFilter ? all.filter((r) => r.level === scanState.levelFilter) : all;
   const list = (u === all ? sortedUniverse() : u.slice().sort((a, b) => b.dy - a.dy)).slice(0, 100);
-  if (!list.length) return '';
+  // 筛到 0 只时不要整页 return ''：那样连筛选按钮一起没了，用户只能刷新
+  if (!list.length) {
+    return `${statCards(all)}
+  ${levelChips(all)}
+  ${toggleChips()}
+  <section class="panel fade-in">
+    <div class="panel-head"><span class="panel-title">扫描榜</span><span class="section-note">当前筛选 0 只</span></div>
+    <div class="panel-body" style="padding:26px 12px;text-align:center;color:var(--text-3);font-size:13px">
+      这个筛选条件下<b>一只都没有</b>。换个等级，或者点「全部」看 ${all.length} 只。
+    </div>
+  </section>`;
+  }
   const maxScore = Math.max(...list.map((x) => x.score || 0), 1);
   const sortKey = scanState.sort.key;
   const sortDir = scanState.sort.dir > 0 ? '↑' : '↓';

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { withEv } from './div-helper.js';
 import assert from 'node:assert/strict';
 import { runPortfolioBacktest } from '../src/engine/portfolioBacktest.js';
 
@@ -11,7 +12,7 @@ function mkSeries(map) {
   return m;
 }
 
-const dividends = { A: { years: { 2019: 1, 2020: 1 } }, B: { years: { 2019: 2 } } };
+const dividends = withEv({ A: { years: { 2019: 1, 2020: 1 } }, B: { years: { 2019: 2 } } });
 
 test('投入回测：起点净值 = 本金，分红复投进净值，不复投口径更少', () => {
   const series = mkSeries({ A: [10, 10, 10, 10, 10], B: [20, 20, 20, 20, 20] });

@@ -30,13 +30,24 @@ export function priceAt(prices, code, ym) {
   return prices.get(code)?.get(ym) ?? null;
 }
 
-/** code 在 ym 之前是否有至少 n 个月的价格数据（上市满 n 个月） */
+/** 两个 ym 之间隔了几个月 */
+function monthsBetween(a, b) {
+  const [ay, am] = String(a).split('-').map(Number);
+  const [by, bm] = String(b).split('-').map(Number);
+  return (by * 12 + bm) - (ay * 12 + am);
+}
+
+/** code 在 ym 之前是否有至少 n 个月的价格数据（上市满 n 个月）
+ *
+ * 用「最早一条到 ym 的月份差」判断，不用「条数」：组合对比为了省流量，
+ * 选股只喂每年 4 月末的价格（稀疏），按条数会数成「上市满 24 年」，
+ * 把全市场筛空。月份差对完整月线和稀疏月线都成立。 */
 function hasHistory(prices, code, ym, n = 24) {
   const m = prices.get(code);
-  if (!m) return false;
-  let c = 0;
-  for (const k of m.keys()) if (k < ym) c++;
-  return c >= n;
+  if (!m || !m.size) return false;
+  const first = m.keys().next().value;
+  if (!first) return false;
+  return monthsBetween(first, ym) >= n;
 }
 
 /** 上一年度每股分红 */
@@ -61,7 +72,9 @@ function consecutiveDivYears(divs, code, year) {
  */
 export function selectCandidates({ baseline, prices, ym, year, params, finHistory }) {
   const { pool, dividends } = baseline;
-  const useQuality = params.quality !== false && !!finHistory;
+  // 财报没了就别筛：空对象也是「真值」，以前 `!!finHistory` 会把「拉失败」当成「有财报」，
+  // 于是每只股票都在 `if (!fin) continue` 上被筛掉，策略静默变成空组合（99.9 万 / -0.0%）。
+  const useQuality = params.quality !== false && finHistory && Object.keys(finHistory).length > 0;
   const out = [];
   for (const code of Object.keys(pool)) {
     const info = pool[code];
@@ -108,11 +121,12 @@ function weightsFor(list, mode) {
  * 运行计划回测。
  * @param {object} opts
  * @param {object} opts.baseline {pool, dividends}
- * @param {object} opts.months   {code: [[ym, close]]}
+ * @param {object} opts.months   {code: [[ym, close]]}  净值用的完整月线（只需覆盖会被选中的股票）
+ * @param {object} [opts.screenMonths] {code: [[ym, close]]} 选股用的价格，可以稀疏（只给每年 4 月末）
  * @param {object} opts.benchmark {ym: value}
  * @param {object} opts.params  {startYear, endYm, holdN, minDy, minDivYears, weight, cost}
  */
-export function runPlanBacktest({ baseline, months, benchmark = {}, params = {}, finHistory = null }) {
+export function runPlanBacktest({ baseline, months, screenMonths = null, benchmark = {}, params = {}, finHistory = null }) {
   const p = {
     startYear: 2013,
     endYm: '2026-10',
@@ -123,7 +137,9 @@ export function runPlanBacktest({ baseline, months, benchmark = {}, params = {},
     cost: 0.001,
     ...params,
   };
-  const prices = toPriceIndex(months);
+  // 选股可以只看每年 4 月末的价（省流量），净值得用完整月线（回撤才对）
+  const prices = toPriceIndex(screenMonths || months);
+  const fullPrices = toPriceIndex(months);
   const rebalanceYm = (y) => YM(y, 4);
 
   // 预计算每月末列表
@@ -177,8 +193,8 @@ export function runPlanBacktest({ baseline, months, benchmark = {}, params = {},
       let ret = 0;
       let hit = 0;
       for (const it of current.items) {
-        const p0 = priceAt(prices, it.code, prevYm);
-        const p1 = priceAt(prices, it.code, ym);
+        const p0 = priceAt(fullPrices, it.code, prevYm);
+        const p1 = priceAt(fullPrices, it.code, ym);
         if (!p0 || !p1) continue;
         hit++;
         const priceRet = p1 / p0 - 1;
@@ -188,7 +204,7 @@ export function runPlanBacktest({ baseline, months, benchmark = {}, params = {},
       }
       // 有成分股停牌/缺数据时，按命中权重归一，避免凭空损失
       if (hit > 0) {
-        const wsum = current.items.reduce((s, it) => s + (priceAt(prices, it.code, ym) && priceAt(prices, it.code, prevYm) ? it.weight : 0), 0);
+        const wsum = current.items.reduce((s, it) => s + (priceAt(fullPrices, it.code, ym) && priceAt(fullPrices, it.code, prevYm) ? it.weight : 0), 0);
         if (wsum > 0 && wsum < 0.999) ret = ret / wsum;
       }
       prevNav = nav;

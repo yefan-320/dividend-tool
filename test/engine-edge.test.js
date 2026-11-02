@@ -13,6 +13,7 @@
  *  - 回测 weight 契约：各股票 weight 合计 ≤ 100（本文件同时测试 >100 的防御行为）。
  */
 import test from 'node:test';
+import { withEv } from './div-helper.js';
 import assert from 'node:assert/strict';
 
 import { runPortfolioBacktest } from '../src/engine/portfolioBacktest.js';
@@ -92,7 +93,7 @@ test('不变量：once 回测全程 nav 有限、现金非负、nav = 现金 + �
       A: [10, 12, 8, 11, 9, 13, 10, 12],
       B: [20, 18, 22, 19, 21, 17, 23, 20],
     }),
-    dividends: { A: { years: { 2019: 1, 2020: 1, 2021: 1 } }, B: { years: { 2019: 2 } } },
+    dividends: withEv({ A: { years: { 2019: 1, 2020: 1, 2021: 1 } }, B: { years: { 2019: 2 } } }),
     monthlyAdd: 10000,
   }));
   assertNavInvariants(r, 'once');
@@ -142,7 +143,7 @@ test('不变量：dip 回测 nav 有限、只买不卖、没触发的股票一�
       A: [10, 12, 8, 11, 9, 13, 10, 12],
       B: [20, 18, 22, 19, 21, 17, 23, 20],
     }),
-    dividends: { A: { years: { 2018: 1, 2019: 1, 2020: 1 } } },
+    dividends: withEv({ A: { years: { 2018: 1, 2019: 1, 2020: 1 } } }),
     entry: { mode: 'dip', minDy: 5.5 },
   }));
   assertNavInvariants(r, 'dip');
@@ -188,7 +189,7 @@ test('单只 100% / 0 权重 / 空组合：不崩、净值有限、不产生持�
   // 0 权重 = 空组合：全现金，只吃现金利息
   for (const holdings of [[{ code: 'A', weight: 0 }], []]) {
     for (const entry of [{ mode: 'once' }, { mode: 'staged', months: 4 }, { mode: 'dip', minDy: 5.5 }]) {
-      const r = runPortfolioBacktest(baseOpts({ holdings, entry, dividends: { A: { years: { 2018: 1 } } } }));
+      const r = runPortfolioBacktest(baseOpts({ holdings, entry, dividends: withEv({ A: { years: { 2018: 1 } } }) }));
       assert.equal(Math.round(r.nav[0][1]), 1000000, `${entry.mode} 空组合起点净值应 = 本金`);
       assertNavInvariants(r, `空组合 ${entry.mode}`);
       assert.deepEqual(r.builds, []);
@@ -231,15 +232,15 @@ test('未上市股票份额摊给已上市：起点不闲置、上市满 6 个�
 /* ============================ 3. entry：once 缺省 / replay 忽略 / staged 边界 ============================ */
 
 test('once 缺省与显式 {mode:once} 结果完全一致（含 entry 字段）', () => {
-  const a = runPortfolioBacktest(baseOpts({ dividends: { A: { years: { 2019: 1 } } }, monthlyAdd: 5000 }));
-  const b = runPortfolioBacktest(baseOpts({ dividends: { A: { years: { 2019: 1 } } }, monthlyAdd: 5000, entry: { mode: 'once' } }));
+  const a = runPortfolioBacktest(baseOpts({ dividends: withEv({ A: { years: { 2019: 1 } } }), monthlyAdd: 5000 }));
+  const b = runPortfolioBacktest(baseOpts({ dividends: withEv({ A: { years: { 2019: 1 } } }), monthlyAdd: 5000, entry: { mode: 'once' } }));
   assert.deepEqual(a, b);
   assert.deepEqual(a.entry, { mode: 'once', months: 12, minDy: 5.5, installments: [], triggered: {}, neverTriggered: [] });
 });
 
 test('replay 模式忽略 entry：净值/事件/持仓构成与不传 entry 完全一致', () => {
   const common = {
-    dates: DATES, series: flatSeries(), dividends: { A: { years: { 2019: 1 } } },
+    dates: DATES, series: flatSeries(), dividends: withEv({ A: { years: { 2019: 1 } } }),
     holdings: [{ code: 'A', weight: 100 }],
     capital: 0, monthlyAdd: 0, from: DATES[0], to: DATES.at(-1), mode: 'replay',
     lots: [{ code: 'A', shares: 10000 }], cash0: 100000,
@@ -308,7 +309,7 @@ function dipCase({ minDy, dps, price = 20 }) {
   return runPortfolioBacktest({
     dates,
     series: new Map([['A', { dates: ['2019-06-03', ...dates], closes: [price, price, price] }]]),
-    dividends: { A: { years: { 2018: dps } } },
+    dividends: withEv({ A: { years: { 2018: dps } } }),
     holdings: [{ code: 'A', weight: 100 }],
     capital: 1000000, monthlyAdd: 0, from: dates[0], to: dates.at(-1), mode: 'invest',
     entry: { mode: 'dip', minDy },
@@ -344,7 +345,7 @@ test('dip 已知 DPS 口径：4 月前用 Y-2 年度、4 月后用 Y-1 年度', 
   const r1 = runPortfolioBacktest({
     dates,
     series: new Map([['A', { dates: ['2019-06-03', ...dates], closes: [20, 20, 20] }]]),
-    dividends: { A: { years: { 2018: 0.5, 2019: 2 } } },
+    dividends: withEv({ A: { years: { 2018: 0.5, 2019: 2 } } }),
     holdings: [{ code: 'A', weight: 100 }],
     capital: 1000000, monthlyAdd: 0, from: dates[0], to: dates.at(-1), mode: 'invest',
     entry: { mode: 'dip', minDy: 5.5 },
@@ -357,7 +358,7 @@ test('dip 已知 DPS 口径：4 月前用 Y-2 年度、4 月后用 Y-1 年度', 
   const r2 = runPortfolioBacktest({
     dates: dates2,
     series: new Map([['A', { dates: ['2020-02-03', ...dates2], closes: [20, 20, 20] }]]),
-    dividends: { A: { years: { 2020: 2 } } },
+    dividends: withEv({ A: { years: { 2020: 2 } } }),
     holdings: [{ code: 'A', weight: 100 }],
     capital: 1000000, monthlyAdd: 0, from: dates2[0], to: dates2.at(-1), mode: 'invest',
     entry: { mode: 'dip', minDy: 5.5 },
@@ -370,7 +371,7 @@ test('dip 触发后按「当前总资产 × w%」补仓，误差不超过 1 个�
   const series = new Map(['A', 'B', 'C'].map((code) => [code, { dates: ['2019-06-03', ...dates], closes: [10, 10, 10] }]));
   const r = runPortfolioBacktest({
     dates, series,
-    dividends: { A: { years: { 2018: 1 } } }, // A 起点 10% 触发；B/C 无分红
+    dividends: withEv({ A: { years: { 2018: 1 } } }), // A 起点 10% 触发；B/C 无分红
     holdings: [{ code: 'A', weight: 30 }, { code: 'B', weight: 40 }, { code: 'C', weight: 30 }],
     capital: 1000000, monthlyAdd: 0, from: dates[0], to: dates.at(-1), mode: 'invest',
     entry: { mode: 'dip', minDy: 5.5 },
@@ -427,7 +428,7 @@ test('数值安全：价格 0 / 分红 0 / 极端本金 不产生 NaN、Infinity
   assertNavInvariants(r0, '价格为0');
 
   // 2) 分红为 0：不算分红、不产生分红事件
-  const zeros = runPortfolioBacktest(baseOpts({ dividends: { A: { years: { 2019: 0 } }, B: { years: { 2019: 0 } } } }));
+  const zeros = runPortfolioBacktest(baseOpts({ dividends: withEv({ A: { years: { 2019: 0 } }, B: { years: { 2019: 0 } } }) }));
   assert.equal(zeros.totalDiv, 0);
   assert.equal(zeros.events.filter((e) => e.type === '分红').length, 0);
   assertNavInvariants(zeros, '分红为0');
@@ -667,7 +668,7 @@ test('market 阈值边界：qualityOf（eps/ROE/现金流覆盖）与 dyQuality'
   assert.equal(q([2024, 1, 10, 0, 0, null]).ok, true, '缺现金流字段时不做覆盖否决');
   assert.equal(qualityOf({}, 'X', 2024).why, '缺财报');
 
-  const good = dyQuality({ dividends: { X: { years: { 2024: 1 } } }, finHistory: { X: [[2024, 2, 10, 0, 0, 1.6]] }, code: 'X', year: 2025, price: 10 });
+  const good = dyQuality({ dividends: withEv({ X: { years: { 2024: 1 } } }), finHistory: { X: [[2024, 2, 10, 0, 0, 1.6]] }, code: 'X', year: 2025, price: 10 });
   assert.equal(good.dy, 10);
   assert.equal(good.payout, 50);
   assert.ok(Math.abs(good.cover - 0.8) < 1e-12);

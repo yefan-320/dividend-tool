@@ -23,7 +23,7 @@ const gzipSize = (p) => zlib.gzipSync(fs.readFileSync(path.join(ROOT, p)), { lev
 
 const BUDGET = {
   coreDataKB: 420,
-  shellKB: 145,
+  shellKB: 160, // v1.8.0：修分组对比的数据链路 + 空态/颜色/文案，+4KB；首屏总量仍有余量
   firstLoadKB: 560,
   precacheKB: 620, // SW 安装时后台预缓存总量：ECharts 移出后应约 540KB（以前含图表库是 865KB）
 };
@@ -82,8 +82,9 @@ console.log('  核心数据合计'.padEnd(32) + fmt(coreKB) + ' / ' + BUDGET.cor
 console.log('  外壳 JS/CSS（' + shellItems.length + ' 个文件）'.padEnd(26) + fmt(shellKB) + ' / ' + BUDGET.shellKB + 'KB');
 console.log('  首屏合计（含图标）'.padEnd(30) + fmt(firstLoadKB) + ' / ' + BUDGET.firstLoadKB + 'KB');
 console.log('  懒加载：echarts ' + fmt(gzipSize('vendor/echarts.min.js') / 1024) +
-  ' · monthly ' + fmt(gzipSize('data/monthly.json') / 1024) +
-  ' · 财报整包（仅对比模式全市场选股用）' );
+  ' · 组合对比增量 ' + fmt((gzipSize('data/cmp-yearly.json') + gzipSize('data/cmp-fin.json')) / 1024) +
+  '（cmp-yearly + cmp-fin；原来这个页要下 monthly 1443KB + finance-history 1875KB）');
+console.log('  月线：data/monthly/<code>.json 按股票分片，每只约 2.3KB，只拉被选中的那几十只');
 
 if (coreKB > BUDGET.coreDataKB) problems.push(`首屏核心数据 ${fmt(coreKB)} 超预算 ${BUDGET.coreDataKB}KB`);
 if (shellKB > BUDGET.shellKB) problems.push(`外壳 JS/CSS ${fmt(shellKB)} 超预算 ${BUDGET.shellKB}KB`);

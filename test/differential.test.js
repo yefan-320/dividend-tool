@@ -37,6 +37,20 @@ const MS_PER_DAY = 86400000;
 /** 与引擎一致的「自然日差」口径（src/engine/portfolioBacktest.js daysBetween） */
 const daysBetween = (a, b) => Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / MS_PER_DAY));
 
+/** 差分红夹具：把「年度合计 years」摊成「真实除权日 ev」。
+    引擎现在只认 ev——没有除权日的分红一律不计，所以夹具必须给明细。 */
+function withEv(dividends, monthDay = '06-30') {
+  const out = {};
+  for (const [code, d] of Object.entries(dividends)) {
+    const ev = Object.entries(d.years || {})
+      .map(([y, v]) => [`${Number(y) + 1}-${monthDay}`, v])
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    out[code] = { ...d, ev };
+  }
+  return out;
+}
+
 /** 月份最后一天（引擎按月追加/分红判定用「日历里当月最后一根」；夹具直接给月末交易日） */
 const isMonthEndRef = (dates, i) => !dates[i + 1] || dates[i + 1].slice(0, 7) !== dates[i].slice(0, 7);
 
@@ -235,6 +249,7 @@ function refPlanBacktest({ baseline, months, params = {}, finHistory = null }) {
  */
 function refPortfolioOnce({ dates, series, dividends, holdings, capital }) {
   const active = holdings.map((h) => ({ code: h.code, weight: Number(h.weight) }));
+  const evPtrRef = new Map();
   const px = (code, date) => priceAtRef(series.get(code), date);
   const stockValue = (sh, date) => active.reduce((s, h) => s + (sh[h.code] || 0) * (px(h.code, date) || 0), 0);
 
@@ -306,19 +321,27 @@ function refPortfolioOnce({ dates, series, dividends, holdings, capital }) {
       if (cashR > 0) cashR *= 1 + DAY_RATE * days;
     }
 
-    if (isAprEnd) {
+    {
+      // 每笔按真实除权除息日；没有 ev 就不派
       let paid = 0;
       for (const h of active) {
-        const dps = prevDpsRef(dividends, h.code, y);
-        if (!(dps > 0)) continue;
-        const n = sh[h.code] || 0;
-        if (n > 0) {
-          cash += n * dps;
-          paid += n * dps;
-          divByCode[h.code] = (divByCode[h.code] || 0) + n * dps;
+        const evs = dividends?.[h.code]?.ev || [];
+        let ptr = evPtrRef.get(h.code);
+        if (ptr === undefined) { ptr = 0; while (ptr < evs.length && evs[ptr][0] <= date) ptr++; evPtrRef.set(h.code, ptr); continue; }
+        while (ptr < evs.length && evs[ptr][0] <= date) {
+          const dps = evs[ptr][1];
+          ptr++;
+          if (!(dps > 0)) continue;
+          const n = sh[h.code] || 0;
+          if (n > 0) {
+            cash += n * dps;
+            paid += n * dps;
+            divByCode[h.code] = (divByCode[h.code] || 0) + n * dps;
+          }
+          const nR = shR[h.code] || 0;
+          if (nR > 0) cashR += nR * dps; // 不复投口径：分红只进现金
         }
-        const nR = shR[h.code] || 0;
-        if (nR > 0) cashR += nR * dps; // 不复投口径：分红只进现金
+        evPtrRef.set(h.code, ptr);
       }
       if (paid > 0) {
         divByY[y] = (divByY[y] || 0) + paid;
@@ -365,6 +388,7 @@ function refPortfolioOnce({ dates, series, dividends, holdings, capital }) {
  */
 function refStockBacktest({ code, dates, series, dividends, finHistory, capital, minDy }) {
   const px = (date) => priceAtRef(series, date);
+  let evPtrS = 0;
   let shares = 0;
   let cash = capital;
   const nav = [];
@@ -401,16 +425,22 @@ function refStockBacktest({ code, dates, series, dividends, finHistory, capital,
       if (holdCash > 0) holdCash *= 1 + DAY_RATE * days;
     }
 
-    if (isAprEnd) {
-      const dps = prevDpsRef(dividends, code, y);
-      if (dps > 0 && shares > 0) {
-        const amt = shares * dps;
-        cash += amt;
-        divByY[y] = (divByY[y] || 0) + amt;
-        yearDiv += amt;
-        trades.push({ date, type: '分红' });
+    {
+      const evs = dividends?.[code]?.ev || [];
+      while (evPtrS < evs.length && evs[evPtrS][0] <= date) {
+        const dps = evs[evPtrS][1];
+        evPtrS++;
+        if (!(dps > 0)) continue;
+        if (shares > 0) {
+          const amt = shares * dps;
+          cash += amt;
+          const dy = Number(String(date).slice(0, 4));
+          divByY[dy] = (divByY[dy] || 0) + amt;
+          yearDiv += amt;
+          trades.push({ date, type: '分红' });
+        }
+        if (holdShares > 0) holdCash += holdShares * dps;
       }
-      if (dps > 0 && holdShares > 0) holdCash += holdShares * dps;
     }
 
     if (isAprEnd || isDecEnd) {
@@ -547,11 +577,11 @@ function portfolioFixture(weights) {
     ['BBB', mkSeries(20, -0.001, 0.08, 2)],
     ['CCC', mkSeries(5, 0.002, 0.10, 4)],
   ]);
-  const dividends = {
+  const dividends = withEv({
     AAA: { years: { 2018: 0.5, 2019: 0.6, 2020: 0.55, 2021: 0.7 } },
     BBB: { years: { 2018: 1.0, 2019: 1.2, 2020: 1.1, 2021: 1.3 } },
     CCC: { years: { 2018: 0.2, 2019: 0.25, 2020: 0.2, 2021: 0.3 } },
-  };
+  });
   return {
     dates,
     series,
@@ -573,7 +603,7 @@ function stockFixture({ priceFn, dividends, finHistory }) {
     code: 'A',
     dates,
     series: { dates: ['2016-06-30', ...dates], closes: [Math.round(priceFn(-1) * 100) / 100, ...closes] },
-    dividends,
+    dividends: withEv(dividends),   // 引擎只认 ev：没有除权日的分红不计
     finHistory,
     capital: 1000000,
     monthlyAdd: 0,
@@ -615,6 +645,7 @@ function randomPortfolioFixture(seed) {
     for (let y = 2018; y <= 2021; y++) if (rnd() < 0.85) years[y] = Math.round((0.2 + rnd() * 1.2) * 100) / 100;
     dividends[code] = { years };
   }
+  Object.assign(dividends, withEv(dividends));
   const parts = [0, 1].map(() => Math.floor(80 + rnd() * 380));
   parts.push(1000 - parts[0] - parts[1]);
   const holdings = codes.map((code, i) => ({ code, weight: parts[i] / 10 }));
@@ -807,7 +838,8 @@ test('差分：个股回测 平稳价格 + 分红（买一次持有）与参考�
   assert.equal(buy.date, '2019-04-30');
   // 买入前现金已吃 3 个月日息，故股数 = floor((100 万+利息)/10/100)*100 = 100,300 股（不是恰好 10 万）
   assert.equal(buy.shares, 100300);
-  assert.equal(engine.totalDiv, 2 * buy.shares * 1, '2020/2021 两个 4 月各收到「持股数 × 1 元」分红');
+  // years 2018/2019/2020 摊成 2019/2020/2021 三个 6-30 除权日；2019-04 买入后三笔全收
+  assert.equal(engine.totalDiv, 3 * buy.shares * 1, '2019/2020/2021 三个除权日各收到「持股数 × 1 元」分红');
 });
 
 test('差分：个股回测 线性上涨 + 分红下调 ≥5% 触发卖出，与参考实现一致', () => {

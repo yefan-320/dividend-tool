@@ -183,6 +183,9 @@
   text-transform: none;
 }
 .section-note { font-size: 11px; color: var(--text-3); }
+/* 面板标题后面那个「看全部」链接（今天页候选 62 只只列 8 只，得给个出口） */
+.section-more { font-size: 11px; color: var(--accent-2); text-decoration: none; white-space: nowrap; }
+.section-more:hover { text-decoration: underline; }
 
 /* ---------- 面板 ---------- */
 .panel {
@@ -257,16 +260,19 @@
   .panel-head .section-note { flex: 1 1 100%; }
 }
 
-/* ---------- 触屏：扩大偏小的点击目标（表格星标 / chip / 模式按钮） ---------- */
+/* ---------- 触屏：扩大偏小的点击目标（表格星标 / chip / 模式按钮） ----------
+   32px 在 iPhone 上点得中但偏紧，抬到 36px；图标按钮和视图切换 40px。
+   不一律做 44px：这是信息密度优先的工具，全放大一档候选列表会少看半屏。 */
 @media (pointer: coarse) {
-  .btn.sm { min-height: 32px; }
-  .chip { min-height: 32px; }
-  .bt-chip { min-height: 32px; }
-  .icon-star { min-width: 32px; min-height: 32px; padding: 6px 8px; }
-  .view-tab { min-height: 38px; }
-  #themeBtn { min-width: 34px; min-height: 34px; }
-  .lot-table .btn { min-width: 32px; min-height: 32px; }
-  input.input { min-height: 32px; }
+  .btn.sm { min-height: 36px; padding: 0 12px; }
+  .chip { min-height: 36px; padding: 8px 14px; }
+  .bt-chip { min-height: 36px; }
+  .icon-star { min-width: 36px; min-height: 36px; padding: 7px 9px; }
+  .view-tab { min-height: 40px; }
+  #themeBtn, #themeBtn2 { min-width: 40px; min-height: 40px; }
+  .lot-table .btn { min-width: 36px; min-height: 36px; }
+  .table .ops .btn { height: 30px; padding: 0 9px; }
+  input.input { min-height: 36px; }
 }
 
 /* ---------- iOS / 触屏适配（安全区、视口、输入缩放、点按手感） ---------- */

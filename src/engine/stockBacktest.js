@@ -1,10 +1,10 @@
 /**
  * 单股回测引擎（纯函数，无 DOM）。
  *
- * 规则（每个 4 月末 / 12 月末决策一次，日级估值）：
+ * 规则（每个 4 月末 / 12 月末决策一次，日级估值；分红日期另算，见下）：
  *  - 买入：股息率 ≥ minDy，且质量过关（不亏损、支付率 <85%、现金流覆盖 ≥0.7、ROE ≥5）
  *  - 卖出：质量不过关（亏损 / 现金流覆盖不足 / 支付率过高）或分红下调 ≥5%
- *  - 分红：每年 4 月末到账（上一年度每股分红 × 持股），进现金
+ *  - 分红：每笔按真实除权除息日到账（每股派息 × 持股），进现金；没有 ev 就不派，不猜日期
  *  - 月追加：4/12 月末各入 6 个月
  *  - 不含税；价格不复权，分红单独计现金
  */
@@ -61,6 +61,13 @@ export function runStockBacktest(o) {
   const holdShares = p0 > 0 ? Math.floor(capital / p0 / 100) * 100 : 0;
   let holdCash = capital - holdShares * p0;
 
+  /* 分红只有一个来源：data/div/<code>.json 的 ev（每笔的真实除权除息日 + 每股派息）。
+     没有 ev 的股票就是「没有派息明细」——回测一律不计，绝不编一个「4 月末」出来。
+     years（年度合计）只服务股息率 / 选股判断，不参与回测入账。 */
+  const evAll = Array.isArray(dividends?.[code]?.ev) ? dividends[code].ev : [];
+  const evs = evAll.filter(([d, v]) => d >= (dates[0] || '') && (!to || d <= to) && v > 0);
+  let evI = 0;
+
   for (let i = 0; i < dates.length; i++) {
     const date = dates[i];
     const y = Number(date.slice(0, 4));
@@ -87,18 +94,22 @@ export function runStockBacktest(o) {
     if (i > 0 && cash > 0) cash *= 1 + DAY_RATE * daysBetween(dates[i - 1], date);
     if (i > 0 && holdCash > 0) holdCash *= 1 + DAY_RATE * daysBetween(dates[i - 1], date);
 
-    // 分红到账
-    if (isAprEnd) {
-      const dps = prevDps(dividends, code, y);
-      if (dps > 0 && shares > 0) {
-        const amt = shares * dps;
-        cash += amt;
-        divByY[y] = (divByY[y] || 0) + amt;
-        yearDiv += amt;
-        trades.push({ date, type: '分红', amount: amt, dps, why: `${y - 1} 年度分红到账` });
+    // 分红到账：有几笔派几笔，每笔按自己的除权除息日
+    {
+      const paid = [];
+      while (evI < evs.length && evs[evI][0] <= date) paid.push(evs[evI++]);
+      for (const [xd, dps] of paid) {
+        if (dps > 0 && shares > 0) {
+          const amt = shares * dps;
+          cash += amt;
+          const dy = Number(String(xd).slice(0, 4));
+          divByY[dy] = (divByY[dy] || 0) + amt;
+          yearDiv += amt;
+          trades.push({ date, type: '分红', amount: amt, div: amt, dps, why: `${xd} 除息到账` });
+        }
+        // 买入持有对照同样拿分红（现金，不买入）
+        if (dps > 0 && holdShares > 0) holdCash += holdShares * dps;
       }
-      // 买入持有对照同样拿分红（现金，不买入）
-      if (dps > 0 && holdShares > 0) holdCash += holdShares * dps;
     }
 
     // 月追加
@@ -106,7 +117,8 @@ export function runStockBacktest(o) {
       const amt = monthlyAdd * 6;
       cash += amt;
       yearAdds += amt;
-      flows.push([date, amt]);
+      // 现金流记负：追加是流出。记正号会让 XIRR 把追加当收益，年化虚高
+      flows.push([date, -amt]);
     }
 
     // 决策
@@ -212,7 +224,7 @@ function daysBetween(a, b) {
  * 规则只有三条：
  *   1. 第一天把首次本金全买进去
  *   2. 每年 4 月末 / 12 月末各入账 6 个月的追加额，当天全买进去
- *   3. 每年 4 月末分红到账，当天再投进去（红利再投资）
+ *   3. 每笔分红按自己的除权除息日到账，当天收盘价再投进去（红利再投资）
  *
  * 不设股息率门槛、不看财报、不因为分红下调卖出——一分钱都不卖。
  * 对照口径（navHold）是同一笔本金第一天买入、追加照投但不复利、分红进现金不进股。
@@ -260,10 +272,11 @@ export function runInvestBacktest(o) {
     trades.push({ date: d0, type: '建仓', shares: n0, price: p0, amount: capital, why: '首次本金全买' });
   }
 
-  /* 分红明细：优先用「每一笔的除权除息日」（ev），没有明细才退回「每年 4 月末按年度合计」。
+  /* 分红明细：只认「每一笔的除权除息日」（ev）；没有就不派。
      一年分两次（中期 + 年度）的公司，只有明细才对得上日子。 */
-  const evAll = Array.isArray(dividends?.[code]?.ev) ? dividends[code].ev : null;
-  const evs = evAll ? evAll.filter(([d, v]) => d >= (dates[0] || '') && (!to || d <= to) && v > 0) : null;
+  /* 同上：只认 ev。没有派息明细就不派，不猜日期。 */
+  const evAll = Array.isArray(dividends?.[code]?.ev) ? dividends[code].ev : [];
+  const evs = evAll.filter(([d, v]) => d >= (dates[0] || '') && (!to || d <= to) && v > 0);
   let ei = 0;
 
   for (let i = 0; i < dates.length; i++) {
@@ -299,12 +312,7 @@ export function runInvestBacktest(o) {
     /* 分红复投：除权除息日当天按收盘价买回（那天价格已经除过息，用不复权收盘价才对）。
        除权日撞上周末/停牌，顺延到下一个交易日——也就是这里第一次出现 date >= 除权日的位置。 */
     const divs = [];
-    if (evs) {
-      while (ei < evs.length && evs[ei][0] <= date) divs.push(evs[ei++]);
-    } else if (isAprEnd) {
-      const dps = prevDps(dividends, code, y);
-      if (dps > 0) divs.push([`${y}-04-30`, dps]);
-    }
+    while (ei < evs.length && evs[ei][0] <= date) divs.push(evs[ei++]);
 
     for (const [xd, dps] of divs) {
       if (!(shares > 0) || !(dps > 0)) continue;
@@ -320,9 +328,9 @@ export function runInvestBacktest(o) {
       if (n > 0) {
         shares += n;
         cash -= n * p;
-        trades.push({ date, type: '分红复投', shares: n, price: p, amount: n * p, dps, why: `${xd} 除息，每股派 ${dps.toFixed(4)}，当天买回` });
+        trades.push({ date, type: '分红复投', shares: n, price: p, amount: n * p, div: amt, dps, why: `${xd} 除息，每股派 ${dps.toFixed(4)}，当天买回` });
       } else {
-        trades.push({ date, type: '分红', amount: amt, dps, why: `${xd} 除息，每股派 ${dps.toFixed(4)}，不够一手留现金` });
+        trades.push({ date, type: '分红', amount: amt, div: amt, dps, why: `${xd} 除息，每股派 ${dps.toFixed(4)}，不够一手留现金` });
       }
     }
 
@@ -346,6 +354,22 @@ export function runInvestBacktest(o) {
   const bench = o.benchmarkSeries
     ? buildBenchmark({ dates, rows: o.benchmarkSeries, capital, monthlyAdd, from, to, flows: flows.length > 1 })
     : null;
+  const lowVol = o.lowVolSeries
+    ? buildBenchmark({ dates, rows: o.lowVolSeries, capital, monthlyAdd, from, to, flows: flows.length > 1 })
+    : null;
+
+  // 回本：累计分红第一次 ≥ 本金 的那一年（本金口径；有定投时按首次本金算）
+  let cumDiv = 0;
+  let paybackYear = null;
+  for (const y of yearly) { cumDiv += y.div; if (paybackYear == null && cumDiv >= capital) paybackYear = y.year; }
+  // 图上三条线的终值（起点归一到 100），标题栏直接用，省得轴上再标一次
+  const nav0v = nav.length ? nav[0][1] : capital;
+  const lastNorm = (x) => (x && x.rows && x.rows.length && nav0v > 0 ? +((x.rows[x.rows.length - 1][1] / nav0v) * 100).toFixed(2) : null);
+  // 分红增速：首末两个有分红的年份之间
+  const dY = yearly.filter((y) => y.div > 0);
+  const divCagr = dY.length > 1 && dY[0].year < dY[dY.length - 1].year
+    ? Math.pow(dY[dY.length - 1].div / dY[0].div, 1 / (dY[dY.length - 1].year - dY[0].year)) - 1
+    : null;
 
   return {
     code, from, to, dates, nav, navHold: hold, trades, divByY, yearly,
@@ -362,12 +386,22 @@ export function runInvestBacktest(o) {
       sharpe: sharpeOf(nav),
       buys: trades.filter((t) => t.type === '定投').length,
       reinvest: trades.filter((t) => t.type === '分红复投').length,
+      divMissing: evs.length === 0,   // 没有派息明细：回测里一股分红都没有
       benchCagr: bench ? bench.cagr : null,
       benchEnd: bench ? bench.end : null,
       excess: bench && cagr != null && bench.cagr != null ? cagr - bench.cagr : null,
+      lowVolCagr: lowVol ? lowVol.cagr : null,
+      lowVolEnd: lowVol ? lowVol.end : null,
+      excessLowVol: lowVol && cagr != null && lowVol.cagr != null ? cagr - lowVol.cagr : null,
+      divCagr,
+      paybackYear,
+      navLast: nav.length && nav0v > 0 ? +((nav[nav.length - 1][1] / nav0v) * 100).toFixed(2) : null,
+      benchLast: lastNorm(bench),
+      lowVolLast: lastNorm(lowVol),
       years: daysBetween(from, to) / 365.25,
     },
     bench,
+    lowVol,
     mode: 'invest',
   };
 }

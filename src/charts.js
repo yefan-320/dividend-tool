@@ -17,15 +17,23 @@ function theme() {
 }
 
 /* 全站统一语义色：同一个东西，不管出现在哪张图里都是同一个颜色。
-   净值=金 · 基准=灰 · 回撤/卖=红 · 分红=青 · 买入/投入=蓝 */
-export const C = {
-  nav: '#d8a84e',    // 净值 / 这只股票 / 策略
-  bench: '#8b93a1',  // 基准指数
-  dd: '#f0883e',     // 回撤（橙：红留给分红，别抢）
-  div: '#ef5b60',    // 分红（红）
-  buy: '#5b9cf5',    // 买入 / 定投 / 投入
-  sell: '#f0883e',   // 卖出（跟回撤同语义：钱出去）
-};
+   色值在 tokens.css 里（--c-*），深浅主题各一套，这里只负责读。
+   按色相拉开、不按明度——深色底上金和灰明度接近会糊成一片。 */
+function Cd() {
+  return {
+    nav: css('--c-nav') || '#e8b64c',      // 净值 / 策略（主角）
+    bench: css('--c-bench') || '#2ec5f0',  // 中证红利全收益（青）
+    lowvol: css('--c-lowvol') || '#a78bfa',// 中证红利低波全收益（紫）
+    div: css('--c-div') || '#ef5b60',      // 分红（红）
+    dd: css('--c-dd') || '#f0883e',        // 回撤（橙：红留给分红，别抢）
+    buy: css('--c-fund') || '#5b9cf5',     // 买入 / 定投 / 投入（蓝）
+    sell: css('--c-dd') || '#f0883e',      // 卖出（跟回撤同语义：钱出去）
+    sub: css('--c-sub') || '#e8b64c',      // 辅助线（增速等派生量）
+  };
+}
+
+/** 给页面层取同一套语义色（HTML 里的图例、色块用） */
+export const chartColors = () => Cd();
 
 const chart = (el) => (el ? echarts.getInstanceByDom(el) || echarts.init(el, null, { renderer: 'canvas' }) : null);
 
@@ -38,7 +46,7 @@ function baseTooltip(t) {
     borderWidth: 1,
     padding: [8, 10],
     textStyle: { color: t.text, fontSize: 11 },
-    axisPointer: { type: 'line', lineStyle: { color: t.text3, width: 1, type: 'dashed' } },
+    axisPointer: { type: 'line', lineStyle: { color: t.text3, width: 1 } },
   };
 }
 
@@ -56,6 +64,7 @@ function baseAxis(t) {
 function drawPriceChartImpl(el, rows, opts = {}) {
   if (!el || typeof echarts === 'undefined' || !rows || rows.length < 2) return null;
   const t = theme();
+  const C = Cd();
   const ch = chart(el);
   const dates = rows.map((r) => r[0]);
   const closes = rows.map((r) => r[1]);
@@ -115,7 +124,7 @@ function drawPriceChartImpl(el, rows, opts = {}) {
         ]) },
         markLine: lines.length ? {
           silent: true, symbol: 'none',
-          lineStyle: { color: t.accent, type: 'dashed', width: 1, opacity: 0.5 },
+          lineStyle: { color: t.accent, width: 1, opacity: 0.35 },
           label: { color: t.accent, fontSize: 9, position: 'insideEndTop', formatter: (p) => p.name },
           data: lines.map((l) => ({ yAxis: l.value, name: l.label })),
         } : undefined,
@@ -134,6 +143,7 @@ function drawPriceChartImpl(el, rows, opts = {}) {
 function drawPortfolioChartImpl(el, { nav, navR, bench, lowVol, dd, divByY, capital }) {
   if (!el || typeof echarts === 'undefined' || !nav || nav.length < 2) return null;
   const t = theme();
+  const C = Cd();
   const ch = chart(el);
   const W = (v) => +(v / 10000).toFixed(1);
   const capW = +(capital / 10000).toFixed(1);
@@ -149,7 +159,7 @@ function drawPortfolioChartImpl(el, { nav, navR, bench, lowVol, dd, divByY, capi
       { left: 6, right: 52, top: 350, height: 60, containLabel: true },
       { left: 6, right: 52, top: 426, height: 94, containLabel: true },
     ],
-    legend: { top: 0, left: 0, textStyle: { color: t.text3, fontSize: 10 }, itemWidth: 14, itemHeight: 2, itemGap: 14 },
+    legend: { top: 0, left: 0, textStyle: { color: t.text2, fontSize: 11.5 }, itemWidth: 18, itemHeight: 3, itemGap: 18 },
     tooltip: { ...baseTooltip(t), valueFormatter: (v) => (v == null ? '—' : Number(v).toFixed(1)) },
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     xAxis: [
@@ -167,55 +177,128 @@ function drawPortfolioChartImpl(el, { nav, navR, bench, lowVol, dd, divByY, capi
       { type: 'slider', xAxisIndex: [0, 1], height: 14, bottom: 2, borderColor: t.line, backgroundColor: 'transparent', fillerColor: 'rgba(216,168,78,.12)', textStyle: { color: t.text3, fontSize: 8 } },
     ],
     series: [
-      { name: '组合(复投)', type: 'line', data: pad(nav, W), xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, sampling: 'lttb', lineStyle: { width: 2, color: t.accent }, z: 5, markLine: { silent: true, symbol: 'none', lineStyle: { color: t.text3, type: 'dashed', width: 1, opacity: 0.5 }, label: { color: t.text3, fontSize: 9, formatter: '本金 ' + capW + '万' }, data: [{ yAxis: capW }] } },
-      { name: '红利不复投', type: 'line', data: pad(navR, W), xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.3, color: '#c9a227', opacity: 0.85 }, z: 4 },
-      bench ? { name: '中证红利全收益', type: 'line', data: pad(bench.rows, W), xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.2, color: t.info, opacity: 0.75 }, z: 3 } : null,
-      lowVol ? { name: '红利低波全收益', type: 'line', data: pad(lowVol.rows, W), xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.1, color: '#a78bfa', opacity: 0.7 }, z: 2 } : null,
-      { name: '回撤', type: 'line', data: dd || [], xAxisIndex: 1, yAxisIndex: 1, showSymbol: false, lineStyle: { width: 1, color: t.up, opacity: 0.7 }, areaStyle: { color: 'rgba(239,91,96,.13)' }, z: 3 },
-      { name: '年度分红', type: 'bar', data: divVals, xAxisIndex: 2, yAxisIndex: 2, barMaxWidth: 26, itemStyle: { color: 'rgba(239,91,96,.42)', borderRadius: [3, 3, 0, 0] }, label: { show: true, position: 'top', fontSize: 9, color: t.text3, formatter: (p) => p.value + '万' }, z: 2 },
-      { name: '分红增速', type: 'line', data: divGrowth, xAxisIndex: 2, yAxisIndex: 2, showSymbol: true, symbolSize: 4, lineStyle: { width: 1.5, color: '#e8a33d' }, itemStyle: { color: '#e8a33d' }, label: { show: true, position: 'top', fontSize: 8, color: '#e8a33d', formatter: (p) => (p.value == null ? '' : (p.value >= 0 ? '+' : '') + p.value + '%') }, z: 3 },
+      { name: '组合(复投)', type: 'line', data: pad(nav, W), xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, sampling: 'lttb', lineStyle: { width: 2.2, color: C.nav }, z: 5, markLine: { silent: true, symbol: 'none', lineStyle: { color: t.text3, width: 1, opacity: 0.35 }, label: { color: t.text3, fontSize: 9, formatter: '本金 ' + capW + '万' }, data: [{ yAxis: capW }] } },
+      { name: '红利不复投', type: 'line', data: pad(navR, W), xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.3, color: C.nav, opacity: 0.55 }, z: 4 },
+      bench ? { name: '中证红利全收益', type: 'line', data: pad(bench.rows, W), xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.3, color: C.bench }, z: 3 } : null,
+      lowVol ? { name: '红利低波全收益', type: 'line', data: pad(lowVol.rows, W), xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.6, color: C.lowvol }, z: 2 } : null,
+      { name: '回撤', type: 'line', data: dd || [], xAxisIndex: 1, yAxisIndex: 1, showSymbol: false, lineStyle: { width: 1, color: C.dd, opacity: 0.85 }, areaStyle: { color: 'rgba(240,136,62,.13)' }, z: 3 },
+      { name: '年度分红', type: 'bar', data: divVals, xAxisIndex: 2, yAxisIndex: 2, barMaxWidth: 26, itemStyle: { color: C.div, opacity: 0.75, borderRadius: [3, 3, 0, 0] }, label: { show: true, position: 'insideTop', offset: [0, 3], fontSize: 9, color: '#fff', formatter: (p) => p.value + '万' }, z: 2 },
+      { name: '分红增速', type: 'line', data: divGrowth, xAxisIndex: 2, yAxisIndex: 2, showSymbol: true, symbolSize: 4, lineStyle: { width: 1.5, color: C.div }, itemStyle: { color: C.div }, label: { show: true, position: 'top', fontSize: 8, color: C.div, formatter: (p) => (p.value == null ? '' : (p.value >= 0 ? '+' : '') + p.value + '%') }, z: 3 },
     ].filter(Boolean),
   });
   return ch;
 }
 
-/* ---------------- 个股回测：净值 + 基准 + 回撤 ---------------- */
+/* ---------------- 个股回测：净值 + 两条基准 + 回撤 + 年度分红 ---------------- */
 
-function drawNavChartImpl(el, { nav, bench, dd, hold, capital }) {
+const pad2 = (n) => (n < 10 ? '0' + n : '' + n);
+const tsOf = (d) => new Date(d + 'T00:00:00').getTime();
+const dsOf = (ts) => {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+};
+/** 在 [[date, v]] 里找离 ts 最近的一条（lttb 采样后原始点会缺席，不能用精确匹配） */
+function nearestVal(arr, ts) {
+  if (!arr || !arr.length) return null;
+  let lo = 0, hi = arr.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (tsOf(arr[mid][0]) < ts) lo = mid + 1; else hi = mid;
+  }
+  let best = lo;
+  if (lo > 0 && Math.abs(tsOf(arr[lo - 1][0]) - ts) <= Math.abs(tsOf(arr[lo][0]) - ts)) best = lo - 1;
+  return arr[best][1];
+}
+
+function drawNavChartImpl(el, { nav, bench, lowVol, dd, divByY, hold, capital }) {
   if (!el || typeof echarts === 'undefined' || !nav || nav.length < 2) return null;
   const t = theme();
+  const C = Cd();
   const ch = chart(el);
   const nav0 = nav[0][1] || capital;
-  const norm = (arr) => (arr || []).map(([d, v]) => [d, +((v / nav0) * 100).toFixed(1)]);
-  const benchNorm = bench ? norm(bench.rows) : null;
-  const holdNorm = hold ? norm(hold) : null;
+  const norm = (arr) => (arr || []).map(([d, v]) => [d, +((v / nav0) * 100).toFixed(2)]);
+  const navN = norm(nav);
+  const benchN = bench ? norm(bench.rows) : null;
+  const lowVolN = lowVol ? norm(lowVol.rows) : null;
+  const holdN = hold ? norm(hold) : null;
+  const lastTs = tsOf(navN[navN.length - 1][0]);
+  // 年份要连续：没分红的年份摆 0，别让坐标轴跳着走
+  const dy0 = Number(String(navN[0][0]).slice(0, 4));
+  const dy1 = Number(String(navN[navN.length - 1][0]).slice(0, 4));
+  const dy = divByY || {};
+  const divRows = [];
+  const divGrowth = [];
+  for (let y = dy0; y <= dy1; y++) {
+    divRows.push([`${y}-12-31`, +((dy[y] || 0) / 10000).toFixed(2)]);
+    const prev = dy[y - 1];
+    const cur = dy[y];
+    divGrowth.push([`${y}-12-31`, prev > 0 && cur != null ? +(((cur / prev) - 1) * 100).toFixed(1) : null]);
+  }
+
+  const f2 = (v) => (v == null ? '—' : Number(v).toFixed(2));
+  const row = (c, name, val) => `<div style="display:flex;gap:14px;justify-content:space-between;line-height:1.65;white-space:nowrap">
+      <span style="color:${t.text2}"><i style="background:${c};width:7px;height:7px;border-radius:2px;display:inline-block;margin-right:6px;vertical-align:1px"></i>${name}</span>
+      <b style="font-variant-numeric:tabular-nums;color:${t.text}">${val}</b></div>`;
+
   ch.setOption({
     animation: false,
     backgroundColor: 'transparent',
     grid: [
-      { left: 6, right: 48, top: 30, height: '58%', containLabel: true },
-      { left: 6, right: 48, top: '76%', height: '16%', containLabel: true },
+      { left: 8, right: 78, top: 30, height: '44%' },      // 净值
+      { left: 8, right: 78, top: '56%', height: '12%' },   // 回撤
+      { left: 8, right: 78, top: '72%', height: '13%' },   // 年度分红
     ],
-    legend: { top: 0, left: 0, textStyle: { color: t.text3, fontSize: 10 }, itemWidth: 14, itemHeight: 2, itemGap: 14 },
-    tooltip: { ...baseTooltip(t) },
-    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    legend: {
+      top: 0, left: 0,
+      textStyle: { color: t.text2, fontSize: 11.5 },
+      itemWidth: 18, itemHeight: 3, itemGap: 18,
+      inactiveColor: t.text3,
+    },
+    tooltip: {
+      ...baseTooltip(t),
+      formatter: (ps) => {
+        const av = ps && ps.length ? ps[0].axisValue : null;
+        if (av == null) return '';
+        const ts = typeof av === 'number' ? av : tsOf(String(av).slice(0, 10));
+        const lines = [row(C.nav, '规则净值', f2(nearestVal(navN, ts)))];
+        if (benchN) lines.push(row(C.bench, '中证红利', f2(nearestVal(benchN, ts))));
+        if (lowVolN) lines.push(row(C.lowvol, '红利低波', f2(nearestVal(lowVolN, ts))));
+        if (holdN) lines.push(row(C.buy, '买入持有', f2(nearestVal(holdN, ts))));
+        const d = nearestVal(dd, ts);
+        if (d != null) lines.push(row(C.dd, '回撤', f2(d) + '%'));
+        const dv = nearestVal(divRows, tsOf(String(new Date(ts).getFullYear()) + '-12-31'));
+        if (dv) lines.push(row(C.div, `${new Date(ts).getFullYear()} 年分红`, f2(dv) + ' 万'));
+        const gy = new Date(ts).getFullYear();
+        const gPrev = (divByY || {})[gy - 1];
+        const gCur = (divByY || {})[gy];
+        if (gPrev > 0 && gCur != null) lines.push(row(C.sub, '分红增速', ((gCur / gPrev - 1) * 100 >= 0 ? '+' : '') + ((gCur / gPrev - 1) * 100).toFixed(2) + '%'));
+        return `<div style="font-family:var(--mono);font-size:10px;color:${t.text3};margin-bottom:5px">${dsOf(ts)}</div>${lines.join('')}`;
+      },
+    },
+    axisPointer: { link: [{ xAxisIndex: 'all' }], lineStyle: { color: 'rgba(255,255,255,.28)', width: 1 } },
     xAxis: [
       { type: 'time', gridIndex: 0, ...baseAxis(t), axisLabel: { show: false } },
-      { type: 'time', gridIndex: 1, ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9 } },
+      { type: 'time', gridIndex: 1, ...baseAxis(t), axisLabel: { show: false } },
+      { type: 'time', gridIndex: 2, ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9.5, formatter: (v) => (v > lastTs ? '' : String(new Date(v).getFullYear())) } },
     ],
     yAxis: [
-      { type: 'value', scale: true, gridIndex: 0, position: 'right', ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9.5, formatter: (v) => v.toFixed(0) }, splitLine: { show: true, lineStyle: { color: t.line } } },
-      { type: 'value', gridIndex: 1, position: 'right', max: 0, min: 'dataMin', ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 8, formatter: '{value}%' }, splitLine: { show: false } },
+      { type: 'value', scale: true, gridIndex: 0, position: 'right', splitNumber: 4, ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 10, formatter: (v) => v.toFixed(0) }, splitLine: { show: true, lineStyle: { color: 'rgba(255,255,255,.04)' } } },
+      { type: 'value', gridIndex: 1, position: 'right', max: 0, min: 'dataMin', splitNumber: 3, ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 8.5, formatter: (v) => v.toFixed(0) + '%' }, splitLine: { show: false } },
+      { type: 'value', gridIndex: 2, position: 'right', splitNumber: 2, ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 8.5, formatter: (v) => v.toFixed(0) + '万' }, splitLine: { show: false } },
+      { type: 'value', gridIndex: 2, position: 'left', show: false, scale: true },
     ],
     dataZoom: [
-      { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
-      { type: 'slider', xAxisIndex: [0, 1], height: 14, bottom: 2, borderColor: t.line, backgroundColor: 'transparent', fillerColor: 'rgba(216,168,78,.12)', textStyle: { color: t.text3, fontSize: 8 } },
+      { type: 'inside', xAxisIndex: [0, 1, 2], start: 0, end: 100 },
+      { type: 'slider', xAxisIndex: [0, 1, 2], height: 15, bottom: 2, borderColor: 'transparent', backgroundColor: 'rgba(255,255,255,.05)', fillerColor: 'rgba(232,182,76,.22)', handleStyle: { color: 'rgba(232,182,76,.65)', borderColor: 'transparent' }, moveHandleStyle: { color: 'rgba(232,182,76,.35)' }, textStyle: { color: t.text3, fontSize: 8 } },
     ],
     series: [
-      { name: '规则净值', type: 'line', data: norm(nav), showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.9, color: t.accent }, z: 4 },
-      holdNorm ? { name: '买入持有', type: 'line', data: holdNorm, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.2, color: C.buy, opacity: 0.7 }, z: 3 } : null,
-      benchNorm ? { name: '中证红利全收益', type: 'line', data: benchNorm, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.1, color: C.bench, opacity: 0.9 }, z: 2 } : null,
-      { name: '回撤', type: 'line', data: dd || [], xAxisIndex: 1, yAxisIndex: 1, showSymbol: false, lineStyle: { width: 1, color: C.dd, opacity: 0.8 }, areaStyle: { color: 'rgba(240,136,62,.14)' } },
+      { name: '规则净值', type: 'line', data: navN, showSymbol: false, sampling: 'lttb', lineStyle: { width: 2.2, color: C.nav }, itemStyle: { color: C.nav }, z: 6 },
+      benchN ? { name: '中证红利', type: 'line', data: benchN, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.3, color: C.bench }, itemStyle: { color: C.bench }, z: 4 } : null,
+      lowVolN ? { name: '红利低波', type: 'line', data: lowVolN, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.6, color: C.lowvol }, itemStyle: { color: C.lowvol }, z: 3 } : null,
+      holdN ? { name: '买入持有', type: 'line', data: holdN, showSymbol: false, sampling: 'lttb', lineStyle: { width: 1.2, color: C.buy, opacity: 0.75 }, itemStyle: { color: C.buy }, z: 5 } : null,
+      { name: '回撤', type: 'line', data: dd || [], xAxisIndex: 1, yAxisIndex: 1, showSymbol: false, lineStyle: { width: 1, color: C.dd, opacity: 0.85 }, areaStyle: { color: 'rgba(240,136,62,.14)' }, z: 3 },
+      { name: '年度分红', type: 'bar', data: divRows, xAxisIndex: 2, yAxisIndex: 2, barMaxWidth: 16, itemStyle: { color: C.div, opacity: 0.85, borderRadius: [2, 2, 0, 0] }, z: 3 },
+      { name: '分红增速', type: 'line', data: divGrowth, xAxisIndex: 2, yAxisIndex: 3, showSymbol: true, symbolSize: 3, lineStyle: { width: 1.6, color: C.sub }, itemStyle: { color: C.sub }, connectNulls: false, z: 4 },
     ].filter(Boolean),
   });
   return ch;
@@ -243,32 +326,48 @@ function drawDonutImpl(el, entries) {
 
 /* ---------------- 收益拆解瀑布 ---------------- */
 
-function drawWaterfallImpl(el, { capital, div, end }) {
+function drawWaterfallImpl(el, { capital, add = 0, div, end }) {
   if (!el || typeof echarts === 'undefined') return null;
   const t = theme();
+  const C = Cd();
   const ch = chart(el);
   const cap = capital / 10000;
+  const ad = add / 10000;
   const dv = div / 10000;
-  const priceGain = (end - capital - div) / 10000;
+  const priceGain = (end - capital - add - div) / 10000;
   const fin = end / 10000;
+  // 只有开了定投才多一段，组合页那套口径不变
+  const cats = ['本金', ...(ad > 0 ? ['定投'] : []), '分红到账', '价格收益', '期末'];
+  const steps = [
+    { name: '本金', value: cap, color: C.buy },
+    ...(ad > 0 ? [{ name: '定投', value: ad, color: C.buy }] : []),
+    { name: '分红到账', value: dv, color: C.div },
+    { name: '价格收益', value: priceGain, color: '#8b93a1' },
+    { name: '期末', value: fin, color: C.nav },
+  ];
+  let run = 0;
+  const bottoms = steps.map((x, i) => {
+    if (i === steps.length - 1) return 0;
+    const b = run;
+    run += x.value;
+    return b;
+  });
+  // 负值那一段（价格亏损）要从上方往下长
+  const baseData = steps.map((x, i) => (i === steps.length - 1 ? 0 : (x.value >= 0 ? bottoms[i] : bottoms[i] + x.value)));
+  const valData = steps.map((x, i) => (i === steps.length - 1 ? x.value : Math.abs(x.value)));
   ch.setOption({
     animation: false,
     backgroundColor: 'transparent',
     grid: { left: 8, right: 12, top: 22, bottom: 6, containLabel: true },
     tooltip: { trigger: 'item', confine: true, backgroundColor: t.surface, borderColor: t.line, textStyle: { color: t.text, fontSize: 11 }, formatter: (p) => `${p.name}<br><b>${p.value} 万</b>` },
-    xAxis: { type: 'category', data: ['本金', '分红到账', '价格收益', '期末'], ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 10 } },
+    xAxis: { type: 'category', data: cats, ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 10 } },
     yAxis: { type: 'value', ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9, formatter: '{value}万' }, splitLine: { show: true, lineStyle: { color: t.line } } },
     series: [
-      { name: 'base', type: 'bar', stack: 'wf', barWidth: '42%', itemStyle: { color: 'transparent' }, data: [0, +Math.max(0, cap).toFixed(1), +(cap + Math.max(0, dv)).toFixed(1), 0], tooltip: { show: false }, z: 1 },
+      { name: 'base', type: 'bar', stack: 'wf', barWidth: '46%', itemStyle: { color: 'transparent' }, data: baseData.map((v) => +v.toFixed(1)), tooltip: { show: false }, z: 1 },
       {
-        name: 'wf', type: 'bar', stack: 'wf', barWidth: '42%', z: 2,
-        data: [
-          { name: '本金', value: +cap.toFixed(1), itemStyle: { color: t.info, borderRadius: [3, 3, 0, 0] } },
-          { name: '分红到账', value: +dv.toFixed(1), itemStyle: { color: t.accent, borderRadius: [3, 3, 0, 0] } },
-          { name: '价格收益', value: +priceGain.toFixed(1), itemStyle: { color: priceGain >= 0 ? t.up : t.down } },
-          { name: '期末', value: +fin.toFixed(1), itemStyle: { color: t.text, borderRadius: [3, 3, 0, 0] } },
-        ],
-        label: { show: true, position: 'top', fontSize: 10, color: t.text2, formatter: (p) => (p.dataIndex === 2 && p.value >= 0 ? '+' : '') + p.value + '万' },
+        name: 'wf', type: 'bar', stack: 'wf', barWidth: '46%', z: 2,
+        data: steps.map((x, i) => ({ name: x.name, value: +valData[i].toFixed(1), itemStyle: { color: x.color, borderRadius: [3, 3, 0, 0] } })),
+        label: { show: true, position: 'top', fontSize: 10, color: t.text2, formatter: (p) => ((p.dataIndex > 0 && p.dataIndex < steps.length - 1 && p.value >= 0) ? '+' : '') + p.value + '万' },
       },
     ],
   });
@@ -280,6 +379,7 @@ function drawWaterfallImpl(el, { capital, div, end }) {
 function drawEnvChartImpl(el, rows) {
   if (!el || typeof echarts === 'undefined') return null;
   const t = theme();
+  const C = Cd();
   const ch = chart(el);
   ch.setOption({
     animation: false,
@@ -290,8 +390,8 @@ function drawEnvChartImpl(el, rows) {
     xAxis: { type: 'category', data: rows.map((x) => x.name), ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 10 } },
     yAxis: { type: 'value', ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9, formatter: '{value}%' }, splitLine: { show: true, lineStyle: { color: t.line } } },
     series: [
-      { name: '我的组合', type: 'bar', data: rows.map((x) => (x.rule == null ? null : +x.rule.toFixed(1))), barWidth: '32%', itemStyle: { color: t.accent, borderRadius: [3, 3, 0, 0] }, label: { show: true, position: 'top', fontSize: 9, color: t.text3, formatter: (p) => (p.value == null ? '' : p.value + '%') } },
-      { name: '中证红利全收益', type: 'bar', data: rows.map((x) => (x.bench == null ? null : +x.bench.toFixed(1))), barWidth: '32%', itemStyle: { color: t.info, borderRadius: [3, 3, 0, 0] }, label: { show: true, position: 'top', fontSize: 9, color: t.text3, formatter: (p) => (p.value == null ? '' : p.value + '%') } },
+      { name: '我的组合', type: 'bar', data: rows.map((x) => (x.rule == null ? null : +x.rule.toFixed(1))), barWidth: '32%', itemStyle: { color: C.nav, borderRadius: [3, 3, 0, 0] }, label: { show: true, position: 'top', fontSize: 9, color: t.text3, formatter: (p) => (p.value == null ? '' : p.value + '%') } },
+      { name: '中证红利全收益', type: 'bar', data: rows.map((x) => (x.bench == null ? null : +x.bench.toFixed(1))), barWidth: '32%', itemStyle: { color: C.bench, borderRadius: [3, 3, 0, 0] }, label: { show: true, position: 'top', fontSize: 9, color: t.text3, formatter: (p) => (p.value == null ? '' : p.value + '%') } },
     ],
   });
   return ch;
@@ -302,6 +402,7 @@ function drawEnvChartImpl(el, rows) {
 function drawDivChartImpl(el, divByY) {
   if (!el || typeof echarts === 'undefined') return null;
   const t = theme();
+  const C = Cd();
   const ch = chart(el);
   const years = Object.keys(divByY || {}).map(Number).filter((y) => divByY[y] > 0).sort();
   let cum = 0;
@@ -314,8 +415,8 @@ function drawDivChartImpl(el, divByY) {
     xAxis: { type: 'category', data: years, ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9 } },
     yAxis: { type: 'value', ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9, formatter: '{value}万' }, splitLine: { show: true, lineStyle: { color: t.line } } },
     series: [
-      { name: '年度分红', type: 'bar', data: years.map((y) => +(divByY[y] / 10000).toFixed(2)), barMaxWidth: 30, itemStyle: { color: 'rgba(239,91,96,.42)', borderRadius: [3, 3, 0, 0] }, label: { show: true, position: 'top', fontSize: 9, color: t.text3, formatter: (p) => p.value + '万' } },
-      { name: '累计', type: 'line', data: cumVals, showSymbol: true, symbolSize: 4, lineStyle: { width: 2, color: C.div }, itemStyle: { color: C.div }, areaStyle: { color: 'rgba(239,91,96,.1)' } },
+      { name: '年度分红', type: 'bar', data: years.map((y) => +(divByY[y] / 10000).toFixed(2)), barMaxWidth: 30, itemStyle: { color: C.div, opacity: 0.75, borderRadius: [3, 3, 0, 0] }, label: { show: true, position: 'top', fontSize: 9, color: t.text3, formatter: (p) => p.value + '万' } },
+      { name: '累计', type: 'line', data: cumVals, showSymbol: true, symbolSize: 4, lineStyle: { width: 2, color: C.div }, itemStyle: { color: C.div }, areaStyle: { color: 'rgba(239,91,96,.10)' } },
     ],
   });
   return ch;
@@ -340,7 +441,7 @@ function drawSimilarChartImpl(el, points, curPct, median) {
       type: 'scatter', symbolSize: 12,
       data: points.map((p) => [p.pct, +p.ret.toFixed(1)]),
       itemStyle: { color: 'rgba(216,168,78,.7)', borderColor: t.accent, borderWidth: 1 },
-      markLine: { silent: true, symbol: 'none', lineStyle: { color: t.up, width: 1, type: 'dashed' }, label: { formatter: '当前 ' + curPct + '%', color: t.text3, fontSize: 9 }, data: [{ xAxis: curPct }] },
+      markLine: { silent: true, symbol: 'none', lineStyle: { color: t.up, width: 1, opacity: 0.5 }, label: { formatter: '当前 ' + curPct + '%', color: t.text3, fontSize: 9 }, data: [{ xAxis: curPct }] },
       markPoint: median != null ? { symbol: 'circle', symbolSize: 10, itemStyle: { color: t.accent }, label: { show: true, position: 'top', formatter: '中位 ' + median.toFixed(0) + '%', color: t.accent, fontSize: 9 }, data: [{ coord: [curPct, +median.toFixed(1)] }] } : undefined,
     }],
   });
@@ -395,15 +496,16 @@ function drawMultiLineChartImpl(el, series, opts = {}) {
     animation: false,
     backgroundColor: 'transparent',
     grid: { left: 6, right: 50, top: 30, bottom: 26, containLabel: true },
-    legend: { top: 0, left: 0, textStyle: { color: t.text3, fontSize: 10 }, itemWidth: 14, itemHeight: 2, itemGap: 14 },
-    tooltip: { ...baseTooltip(t), valueFormatter: (v) => (v == null ? '—' : Number(v).toFixed(1)) },
+    legend: { top: 0, left: 0, textStyle: { color: t.text2, fontSize: 11.5 }, itemWidth: 18, itemHeight: 3, itemGap: 18 },
+    tooltip: { ...baseTooltip(t), valueFormatter: (v) => (v == null ? '—' : Number(v).toFixed(2)) },
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     xAxis: { type: 'time', ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9 } },
     yAxis: { type: 'value', scale: true, position: 'right', ...baseAxis(t), axisLabel: { color: t.text3, fontSize: 9, formatter: opts.yFmt || ((v) => v.toFixed(0)) }, splitLine: { show: true, lineStyle: { color: t.line } } },
     dataZoom: [{ type: 'inside', start: 0, end: 100 }],
-    series: series.map((s) => ({
+    series: series.map((s, i) => ({
       name: s.name, type: 'line', data: s.rows, showSymbol: false, sampling: 'lttb',
       lineStyle: { width: s.width || 1.6, color: s.color || t.accent, opacity: s.opacity == null ? 0.95 : s.opacity }, z: s.z || 3,
+      ...(i === 0 && opts.markLine ? { markLine: opts.markLine } : {}),
     })),
   });
   return ch;

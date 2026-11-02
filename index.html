@@ -19,7 +19,6 @@
 <link rel="stylesheet" href="./styles/pages.css">
 <!-- 预先并行抓取 ES 模块：避免逐层 import 在弱网（每层多一个 RTT）下拖慢首屏 -->
 <!-- 图表库与数据并行下：否则它会排在所有数据之后才发起，图要等两段时间 -->
-<link rel="preload" as="script" href="./vendor/echarts.min.js" fetchpriority="high">
 <link rel="modulepreload" href="./src/data.js">
 <link rel="modulepreload" href="./src/net.js">
 <link rel="modulepreload" href="./src/store.js">

@@ -2,10 +2,12 @@
  * 回测页：组合回测 / 个股回测 / 组合对比（三个 tab，共用同一套日 K + 月线数据）。
  *
  * 数据口径：日 K 不复权（2018-07 起，2000 根交易日），更早区间用月线月末补齐；
- * 分红按「Y-1 年度每股分红在 Y 年 4 月末到账」计现金；不含税、不含佣金。
+ * 分红只有一个来源：data/div/<code>.json 的 ev（每笔真实除权除息日 + 每股派息），按当天收盘价复投。
+ * 没有 ev 的股票在回测里一律不计分红——不猜日期、不编「4 月末」。不含税、不含佣金。
  */
 import {
-  db, loadMonthly, loadFinanceHistory, loadDailyMeta, loadDailyMany, loadIndexDaily,
+  db, loadMonthly, loadMonthlyFor, loadCmpScreen, loadCmpFin, loadPool,
+  loadFinanceHistory, loadDailyMeta, loadDailyMany, loadIndexDaily,
   nameOf, quote, ensureDividends,
 } from '../data.js';
 import { buildSeries, buildTradingDates, monthEnd, priceAt, maxDrawdown, prevDps } from '../engine/market.js';
@@ -17,11 +19,12 @@ import { loadTxs, loadCash, loadPlans, savePlan, loadSettings } from '../store.j
 import {
   drawPortfolioChart, drawPriceChart, drawNavChart, drawDonut, drawWaterfall,
   drawEnvChart, drawDivChart, drawSimilarChart, drawLineMini, drawBarsVs, drawMultiLineChart,
+  chartColors,
 } from '../charts.js';
 import { icon } from '../ui/icons.js';
 import { toast } from '../ui/toast.js';
 import { esc, num, pct, pctSign, upDown, bigMoney } from '../ui/format.js';
-import { mountStockSearch } from '../ui/stockSearch.js';
+import { mountStockSearch, stockMeta } from '../ui/stockSearch.js';
 
 const todayStr = () => db.generated || '2026-10-30';
 const DAY = 86400000;
@@ -41,6 +44,7 @@ export const btState = {
   quality: false,         // 个股回测质量筛选：默认关（只看走势，不拉财报）
   metric: 'nav',
   planId: 'current',
+  cmpPlans: null,         // 组合对比里勾选的方案 id；null = 全选
 };
 
 let ctx = null;
@@ -132,14 +136,14 @@ function monthlyFromSeries(series) {
 
 async function loadMarket(codes, from, to, { finance = false, monthly = 'auto', marketWide = false, stockCode = null } = {}) {
   const dailyMeta = await loadDailyMeta();
-  // 日 K 日历覆盖到 2014-06 起。起点落在日 K 范围内、又不需要全市场选股时，一个月的月线都不拉：
-  //  · 起点早于 2014-06（要月线补早期价格）
-  //  · 对比模式的「红利策略 20 只」（要从 2800 只里选，必须有全市场月线）
-  // 只有这两种情况才下 6.2MB。monthly===false 可强制不拉。
-  const useMonthly = monthly !== false && (from < dailyMeta.cal[0] || marketWide);
-  const [monthsFull, index] = await Promise.all([useMonthly ? loadMonthly() : Promise.resolve(null), loadIndexDaily()]);
-  // 历年财报也按需：个股回测只拉目标股那一片（几 KB），不再下 1.9MB 的整包；
-  // 只有对比模式的红利策略选股才需要全市场财报。拉不到就降级（不做质量筛选），不报错、不白屏。
+  // 只有「起点早于日 K 起点（2014-06）」才需要月线补早期价格；
+  // 而且只要当前这几只的月线分片（data/monthly/<code>.json，每只约 2.3KB），
+  // 不再下 6.4MB 的整包 monthly.json——手机上那包要 48 秒，20 秒就超时了。
+  const useMonthly = monthly !== false && from < dailyMeta.cal[0];
+  const [monthsFull, index] = await Promise.all([useMonthly ? loadMonthlyFor(codes) : Promise.resolve(null), loadIndexDaily()]);
+  // 历年财报按需：个股回测只拉目标股那一片（几 KB），不再下 1.9MB 的整包；
+  // 对比模式的选股财报走 loadCmpFin()（约 257KB），不在这里出。
+  // 拉不到就降级（不做质量筛选），不报错、不白屏。
   let finHistory = null;
   if (finance) {
     const finCodes = marketWide ? null : (stockCode ? [stockCode] : codes);
@@ -241,7 +245,10 @@ function paramBar(opts = {}) {
         <option value="current"${btState.planId === 'current' ? ' selected' : ''}>当前持仓（实时）</option>
         ${loadPlans().map((p) => `<option value="${p.id}"${btState.planId === p.id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}
       </select></label>`}
-      <label class="bt-field"><span>本金(万)</span><input class="input" type="number" id="btCap" min="1" step="10" value="${Math.round(btState.capital / 10000)}"></label>
+      ${btState.portMode === 'replay' && opts.tabs !== false && btState.mode === 'port'
+        ? `<label class="bt-field" title="持仓回放的本金 = 起点那天的组合市值，不是这里填的数"><span>本金(万)</span><input class="input" type="number" id="btCap" value="—" disabled></label>
+           <span class="bt-hint">持仓回放的本金 = 起点那天的市值（这笔本金框不生效）</span>`
+        : `<label class="bt-field"><span>本金(万)</span><input class="input" type="number" id="btCap" min="1" step="10" value="${Math.round(btState.capital / 10000)}"></label>`}
       ${opts.useMktCap ? '<button class="btn sm ghost" id="btUseMktCap">用当前市值</button>' : ''}
       <label class="bt-field"><span>月追加(元)</span><input class="input" type="number" id="btMon" min="0" step="500" value="${btState.monthlyAdd}"></label>
       ${opts.minDy ? `<label class="bt-field"><span>买入股息率≥</span><input class="input" type="number" id="btMinDy" min="0" max="10" step="0.5" value="${btState.minDy}"></label>` : ''}
@@ -253,26 +260,47 @@ function paramBar(opts = {}) {
       <span class="bt-hint" style="margin-left:12px">月追加快捷</span>
       ${[0, 5000, 10000, 20000].map((v) => `<button class="bt-chip ${btState.monthlyAdd === v ? 'on' : ''}" data-add="${v}">${v === 0 ? '不追加' : v / 1000 + '千'}</button>`).join('')}
       ${tabs}
-      <button class="btn primary" id="btRun" style="margin-left:auto">${icon('refresh')} 重跑</button>
+      <button class="btn primary" id="btRun" style="margin-left:auto">${icon('play')} 运行回测</button>
     </div>
+    ${btState.mode === 'cmp' ? cmpPlanPicker() : ''}
     <div class="bt-hint" style="margin-top:8px">${opts.stock
-      ? `日级净值 · 价格不复权 · 每月末定投 · 分红在除权除息日当天按收盘价再投 · 不判断买卖点（没有卖点）· 不含税 · 行情 <b>${esc(todayStr())}</b> · 日 K 自 ${esc(dailyStart())}（更早用月线）`
-      : `日级净值 · 价格不复权 · 分红 4 月末到账 · 未上市股票份额先摊给已上市、上市满 6 个月建仓 · 不含税 · 行情 <b>${esc(todayStr())}</b> · 日 K 自 ${esc(dailyStart())}（更早用月线）`}</div>
+      ? `日级净值 · 价格不复权 · 每月末定投 · 分红在除权除息日当天按收盘价再投 · 不判断买卖点 · 不含税`
+      : `日级净值 · 价格不复权 · 分红按真实除权除息日到账 · 未上市股票份额先摊给已上市、上市满 6 个月建仓 · 不含税 · 行情 <b>${esc(todayStr())}</b> · 日 K 自 ${esc(dailyStart())}（更早用月线）`}</div>
   </section>`;
 }
 
-function metricGrid(cards) {
-  return `<div class="bt-metrics">${cards.map((c) => `<div class="bt-metric ${c.on ? 'on' : ''}" ${c.key ? `data-metric="${c.key}"` : ''}>
+/** 组合对比：选哪几个方案上场。
+ *  以前这个页面根本没有选择入口——所有方案一股脑画进去，超过 5 个再被静默截断，
+ *  用户既不知道该看谁，也不知道少了谁。 */
+function cmpPlanPicker() {
+  const plans = loadPlans();
+  if (!plans.length) {
+    return `<div class="bt-param-row" style="margin-top:10px"><span class="bt-hint">你还没有保存的方案——去「我的 → 方案」建几个，这里就能拿来比。</span></div>`;
+  }
+  const picked = btState.cmpPlans;
+  const on = (id) => !picked || picked.includes(id);
+  return `<div class="bt-param-row" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+    <span class="bt-hint">对比哪些方案</span>
+    <button class="bt-chip ${!picked ? 'on' : ''}" data-cmpplan="__all">全部 ${plans.length} 个</button>
+    ${plans.map((p) => `<button class="bt-chip ${on(p.id) ? 'on' : ''}" data-cmpplan="${p.id}">${esc(p.name)}</button>`).join('')}
+    <span class="bt-hint" style="margin-left:auto">当前持仓 · 红利策略 · 两条指数 始终在场</span>
+  </div>`;
+}
+
+function metricGrid(cards) {  return `<div class="bt-metrics">${cards.map((c) => `<div class="bt-metric ${c.on ? 'on' : ''}" ${c.key ? `data-metric="${c.key}"` : ''}>
       <div class="k">${esc(c.k)}</div><div class="v num ${c.cls || ''}">${c.v}</div><div class="s">${c.s || ''}</div>
     </div>`).join('')}</div>`;
 }
 
 function hero(cfg) {
+  const sub = cfg.chips
+    ? `<div class="hero-chips">${cfg.chips.map((c) => `<span class="hchip ${c.cls || ''}">${c.t}</span>`).join('')}</div>`
+    : `<div class="hero-desc">${cfg.desc}</div>`;
   return `<section class="hero fade-in">
     <div class="hero-main">
       <div class="hero-kicker">${cfg.kicker}</div>
       <div class="hero-line">${cfg.main}</div>
-      <div class="hero-desc">${cfg.desc}</div>
+      ${sub}
     </div>
     <div class="stats">
       ${cfg.stats.map((s) => `<div class="stat"><div class="stat-label">${esc(s.k)}</div><div class="stat-value sm num ${s.cls || ''}">${s.v}</div><div class="stat-sub">${s.s || ''}</div></div>`).join('')}
@@ -294,7 +322,8 @@ function investRules() {
       ? `每月 ${bigMoney(btState.monthlyAdd)}，月最后一个交易日全买`
       : '本次没开定投（月追加 = 0），只有第一天那笔本金'],
     ['分红', '每一笔分红在<b>除权除息日当天</b>按收盘价买回（那天价格已经除过息，用不复权收盘价才对）；不够一手就留在现金里'],
-    ['一年分几次', '不做任何假设：明细里有几笔就派几笔（实际数据里一年 1 笔 3448 只、2 笔 1513 只、3 笔 127 只、4 笔 12 只，最多的一只（中国石化）全部历史 50 笔）'],
+    ['一年分几次', '不做任何假设：<b>data/div/&lt;code&gt;.json 里记了几笔就派几笔</b>（实际数据里一年 1 笔 3448 只、2 笔 1513 只、3 笔 127 只、4 笔 12 只，最多的一只中国石化全部历史 50 笔）'],
+    ['没取到派息明细的股票', '全市场 5406 只里有 5402 只有逐笔除权日；剩下 4 只（301139 / 601059 / 601198 / 000016）数据源查不到除权日——<b>它们在本页一律不计分红</b>，不猜日期、不编「4 月末」'],
     ['不判断买卖点', '不设股息率门槛、不看财报、不因为分红下调卖出——一分钱都不卖，也没有卖点'],
     ['费用', '不含佣金、不含红利税；现金零头不计息'],
     ['价格', '日 K 不复权，更早的区间用月线月末补齐'],
@@ -310,10 +339,10 @@ function rulesCard() {
   const R = [
     ['买入', '4/12 月末决策：股息率 ≥ 买入线，且质量过关（不亏损、支付率 &lt;85%、现金流覆盖 ≥0.7、ROE ≥5）'],
     ['未上市', '目标份额先平均摊给当时已上市的股票（资金不闲置）；上市满 6 个月后按目标权重卖出别的股票把它买回来，买入金额 = 初始份额 × 期间组合增长'],
-    ['分红', '每年 4 月末到账（上一年度每股分红 × 当时持股）；组合口径复投，对照口径进现金'],
+    ['分红', '每笔按<b>真实除权除息日</b>到账（每股派息 × 当时持股），当天收盘价买回；组合口径复投，对照口径进现金。<b>没取到派息明细的股票一律不计分红</b>（不猜日期）'],
     ['卖出', '质量否决（亏损 / 现金流覆盖不足 / 支付率过高）或分红下调 ≥5% → 清仓'],
     ['现金', '现金年息 1.5%，日计'],
-    ['月追加', '4 月末 / 12 月末各入账 6 个月追加额'],
+    ['月追加', '4 月末 / 12 月末各入账 6 个月追加额（定投节奏，跟分红无关）'],
     ['费用', '不含佣金、不含红利税'],
     ['价格', '日 K 不复权（2018-07 起），更早用月线月末；分红单独计现金'],
     ['基准', '中证红利全收益（H00922）日线；最后的月末之后用月线补齐'],
@@ -560,19 +589,20 @@ function renderPort(market, structureData) {
   const sim = similarStates(market, structureData.holdings.map((h) => h.code), r.nav, from, to);
 
   const cards = [
-    { k: '总市值', v: bigMoney(r.end), s: `现金 ${bigMoney(cashNow)} · 仓位 ${((1 - cashNow / (r.end || 1)) * 100).toFixed(0)}%`, key: 'nav', on: btState.metric === 'nav' },
-    { k: useReplay ? '起点市值' : '累计投入', v: bigMoney(r.totalIn), s: hasAdd ? `本金 ${bigMoney(capital)} + 追加 ${bigMoney(r.totalIn - capital)}` : (useReplay ? '当前股数 × 起点价 + 现金' : '起点本金') },
+    { k: '总市值', v: bigMoney(r.end), cls: 'gold', s: `现金 ${bigMoney(cashNow)} · 仓位 ${((1 - cashNow / (r.end || 1)) * 100).toFixed(0)}%`, key: 'nav', on: btState.metric === 'nav' },
+    { k: useReplay ? '起点市值' : '累计投入', v: bigMoney(r.totalIn), cls: 'fund', s: hasAdd ? `本金 ${bigMoney(capital)} + 追加 ${bigMoney(r.totalIn - capital)}` : (useReplay ? '当前股数 × 起点价 + 现金' : '起点本金') },
     { k: '净赚金额', v: bigMoney(r.end - r.totalIn), cls: upDown(r.end - r.totalIn), s: `期末 ${bigMoney(r.end)} − 投入 ${bigMoney(r.totalIn)}` },
     { k: '年化', v: pctSign(s.cagr == null ? null : s.cagr * 100, 1), cls: vc, s: `${num(s.years, 1)} 年 · ${hasAdd ? 'XIRR' : '复利'}`, key: 'ann', on: btState.metric === 'ann' },
-    { k: '红利不复投', v: bigMoney(r.endR), s: `年化 ${pctSign(s.cagrR == null ? null : s.cagrR * 100, 1)}`, key: 'navR', on: btState.metric === 'navR' },
-    { k: '最大回撤', v: pct(s.mdd * 100, 1), cls: 'down', s: `${esc(s.mddPeak)} → ${esc(s.mddTrough)}`, key: 'dd', on: btState.metric === 'dd' },
-    { k: '年分红(估)', v: bigMoney(divEst), s: '当前持仓 × 最新年度每股分红', key: 'div', on: btState.metric === 'div' },
+    { k: '红利不复投', v: bigMoney(r.endR), cls: 'fund', s: `年化 ${pctSign(s.cagrR == null ? null : s.cagrR * 100, 1)}`, key: 'navR', on: btState.metric === 'navR' },
+    { k: '最大回撤', v: pct(s.mdd * 100, 1), cls: 'ddc', s: `${esc(s.mddPeak)} → ${esc(s.mddTrough)}`, key: 'dd', on: btState.metric === 'dd' },
+    { k: '年分红(估)', v: bigMoney(divEst), cls: 'divc', s: '当前持仓 × 最新年度每股分红', key: 'div', on: btState.metric === 'div' },
     { k: '月覆盖', v: expenseOk ? (cov > 999 ? '>999%' : cov.toFixed(0) + '%') : '—', s: expenseOk ? `年分红 ÷ 12 ÷ 月支出 ${expense.toLocaleString('zh-CN')}` : '月支出设置无效（需 100 元–1000 万/月），请到「我的 → 设置」修正', key: 'repay', on: btState.metric === 'repay' },
     { k: 'vs 指数', v: excess == null ? '—' : (excess >= 0 ? '+' : '') + excess.toFixed(1) + 'pp', cls: upDown(excess), s: 'vs 中证红利全收益 年化', key: 'hold', on: btState.metric === 'hold' },
   ];
 
   return `
   ${paramBar({ useMktCap: !useReplay })}
+  ${(r.divMissing || []).length ? `<div class="banner" style="margin-bottom:12px">${icon('alert')}<div><b>${r.divMissing.length} 只股票没取到派息明细</b>（${r.divMissing.map(esc).join('、')}）——它们在本次回测里不计分红，不猜除权日。</div></div>` : ''}
   ${hero({
     kicker: `组合回测 · ${structureData.name || '当前持仓'} · ${useReplay ? '持仓回放（当前股数，假设自起点持有）' : '投入回测（本金按目标结构买入）'}${structureData.plan ? ' · ' + entryLabel(structureData.entry) : ''} · ${from} → ${to} · ${num(s.years, 1)} 年`,
     main: `组合 <b class="num gold">${retTxt}</b> <span class="thin">，年化 ${pctSign(s.cagr == null ? null : s.cagr * 100, 1)} · 基准 ${pctSign(s.benchCagr == null ? null : s.benchCagr * 100, 1)}</span>`,
@@ -691,6 +721,7 @@ function renderStockPage(market, structureData) {
     capital: btState.capital,
     monthlyAdd: btState.monthlyAdd,
     benchmarkSeries: ctx.benchRows,
+    lowVolSeries: ctx.lowVolRows,
     from: clampFrom(btState.from),
     to: btState.to,
   });
@@ -698,16 +729,42 @@ function renderStockPage(market, structureData) {
   const st = r.stats;
   const vc = st.cagr >= 0 ? 'up' : 'down';
   const perYearAdd = btState.monthlyAdd * 12;
+  const meta = stockMeta(code);
+  const divTrades = r.trades.filter((t) => t.type === '分红复投' || t.type === '分红');
+  const divRate = r.totalIn > 0 ? (r.totalDiv / r.totalIn) * 100 : null;
+  const y0 = Number(String(clampFrom(btState.from)).slice(0, 4));
+  const payYear = st.paybackYear == null ? null : st.paybackYear - y0 + 1;
+  const divYears = Object.keys(r.divByY || {}).filter((y) => r.divByY[y] > 0).length;
   return `
+  <section class="sym-bar fade-in">
+    <div class="sym-main">
+      <div class="sym-title">
+        <b class="sym-name">${esc(nameOf(code))}</b>
+        <span class="sym-code">${esc(code)}</span>
+        ${meta && meta.ind ? `<span class="sym-tag">${esc(meta.ind)}</span>` : ''}
+      </div>
+      <div class="sym-meta">日 K 自 ${esc(dailyStart())} · 行情 ${esc(todayStr())} · 不复权 · 分红 ${divTrades.length} 笔</div>
+    </div>
+    <div class="sym-pick">
+      <div class="stock-search">${icon('search')}<input id="stSearch" placeholder="换一只：代码 / 名称" autocomplete="off" spellcheck="false"></div>
+      <div id="stSuggest" class="search-suggest" hidden></div>
+    </div>
+  </section>
+
   ${paramBar({ tabs: false, stock: true })}
-  <div class="stock-search-wrap stock-picker">
-    <div class="stock-search">${icon('search')}<input id="stSearch" placeholder="搜索代码或名称" autocomplete="off" spellcheck="false"></div>
-    <div id="stSuggest" class="search-suggest" hidden></div>
-  </div>
+
+  ${st.divMissing ? `<div class="banner" style="margin-bottom:12px">${icon('alert')}<div><b>没取到 ${esc(nameOf(code))}（${esc(code)}）的派息明细</b>　可能是数据源里查不到它的除权除息日，也可能是这次没联上——<b>本次回测一分分红都没算</b>，不猜日子。分红那几张图是空的，不代表它不分红。</div></div>` : ''}
   ${hero({
     kicker: `个股定投 · ${esc(nameOf(code))} ${esc(code)} · ${clampFrom(btState.from)} → ${btState.to}`,
     main: `${bigMoney(r.totalIn)} <span class="thin">→</span> <b class="num gold">${bigMoney(r.end)}</b><span class="thin">，年化 ${pctSign(st.cagr == null ? null : st.cagr * 100, 1)}</span>`,
-    desc: `不判断买卖点：第一天全买，${perYearAdd > 0 ? `每月追 ${bigMoney(perYearAdd / 12)}，` : '不再追加，'}分红当天再投 · 累计卖出 0 次 · vs 中证红利全收益 ${pctSign(st.excess == null ? null : st.excess * 100, 1)}/年`,
+    chips: [
+      { t: '不判买卖点' },
+      { t: perYearAdd > 0 ? `每月追 ${bigMoney(btState.monthlyAdd)}` : '不再追加' },
+      { t: '分红当天再投' },
+      { t: '卖出 0 次' },
+      { t: `vs 红利 ${pctSign(st.excess == null ? null : st.excess * 100, 1)}`, cls: 'bench' },
+      { t: `vs 低波 ${pctSign(st.excessLowVol == null ? null : st.excessLowVol * 100, 1)}`, cls: 'lowvol' },
+    ],
     stats: [
       { k: '累计收益', v: pctSign(st.ret == null ? null : st.ret * 100, 1), cls: vc, s: `${num(st.years, 1)} 年 · 本金口径` },
       { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: perYearAdd > 0 ? 'XIRR 资金加权' : '复利折算' },
@@ -717,33 +774,118 @@ function renderStockPage(market, structureData) {
   })}
 
   <section class="panel fade-in" style="margin-top:14px">
-    <div class="panel-head"><span class="panel-title">净值曲线</span><span class="section-note">一直买入并持有 vs 中证红利全收益 · 下方是回撤</span></div>
-    <div class="panel-body" style="padding:8px 10px 4px"><div id="stNav" class="chart" style="height:380px"></div></div>
+    <div class="panel-head"><span class="panel-title">净值曲线</span><span class="section-note">终值 <b style="color:var(--c-nav)">${num(st.navLast, 2)}</b> · <b style="color:var(--c-bench)">${num(st.benchLast, 2)}</b> · <b style="color:var(--c-lowvol)">${num(st.lowVolLast, 2)}</b>　|　中段回撤 · 下段每年分红</span></div>
+    <div class="panel-body" style="padding:8px 10px 4px"><div id="stNav" class="chart chart-tall"></div></div>
   </section>
 
   ${metricGrid([
-    { k: '期末', v: bigMoney(r.end), s: '持仓市值 + 零钱', key: 'nav', on: btState.metric === 'nav' || !btState.metric },
-    { k: '累计投入', v: bigMoney(r.totalIn), s: perYearAdd > 0 ? `本金 + 定投 ${bigMoney(r.totalIn - btState.capital)}` : '只有本金', key: 'fund' },
+    { k: '期末', v: bigMoney(r.end), cls: 'gold', s: '持仓市值 + 零钱', key: 'nav', on: btState.metric === 'nav' || !btState.metric },
+    { k: '累计投入', v: bigMoney(r.totalIn), cls: 'fund', s: perYearAdd > 0 ? `本金 + 定投 ${bigMoney(r.totalIn - btState.capital)}` : '只有本金', key: 'fund' },
     { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: perYearAdd > 0 ? 'XIRR 资金加权' : '复利折算', key: 'ann' },
     { k: '最大回撤', v: pct(st.mdd * 100, 1), cls: 'ddc', s: `${esc(st.mddPeak)} → ${esc(st.mddTrough)}`, key: 'dd' },
     { k: '分红', v: bigMoney(r.totalDiv), cls: 'divc', s: `再投 ${st.reinvest} 次，一分没取`, key: 'div' },
-    { k: '买入持有', v: bigMoney(r.endHold), s: `年化 ${pctSign(st.cagrHold == null ? null : st.cagrHold * 100, 1)} · 分红不复投`, key: 'hold' },
-    { k: 'vs 指数', v: pctSign(st.excess == null ? null : st.excess * 100, 1), cls: upDown(st.excess), s: 'vs 中证红利全收益', key: 'bench' },
+    { k: '买入持有', v: bigMoney(r.endHold), cls: 'fund', s: `年化 ${pctSign(st.cagrHold == null ? null : st.cagrHold * 100, 1)} · 分红不复投`, key: 'hold' },
+    { k: '回本', v: payYear == null ? '还没' : `第 ${payYear} 年`, cls: payYear == null ? '' : 'divc', s: payYear == null ? `累计分红 ${pct(divRate, 0)} 本金` : `${st.paybackYear} 年分红盖过本金`, key: 'payback' },
+    { k: 'vs 指数', v: pctSign(st.excess == null ? null : st.excess * 100, 1), cls: upDown(st.excess), s: `vs 红利 · 低波 ${pctSign(st.excessLowVol == null ? null : st.excessLowVol * 100, 1)}`, key: 'bench' },
   ])}
   <div id="metricDetail" style="margin-top:12px"></div>
 
+  <section class="panel fade-in" style="margin-top:14px">
+    <div class="panel-head"><span class="panel-title">钱从哪来</span><span class="section-note">本金 + 分红到账 + 价格涨跌 = 期末</span></div>
+    <div class="panel-body" style="padding:8px 10px 6px"><div id="wfChart" class="chart" style="height:220px"></div></div>
+  </section>
+
   ${fold('kline', '日 K · 建仓 / 分红复投', `收盘线 + MA20/MA60 · 蓝▲建仓/定投 · 红◆分红复投（除权除息日当天买回）· 不卖，没有卖点`, '<div class="panel-body" style="padding:8px 10px 4px"><div id="stChart" class="chart" style="height:380px"></div></div>')}
 
-  <section class="panel fade-in" style="margin-top:14px">
-    <div class="panel-head"><span class="panel-title">年度收益</span><span class="section-note">年末市值 / 当年分红 / 当年追加</span></div>
-    <div class="table-wrap"><table class="table">
-      <thead><tr><th>年</th><th>年初(万)</th><th>年末(万)</th><th>当年收益</th><th>分红(万)</th><th>追加(万)</th></tr></thead>
-      <tbody>${r.yearly.map((y) => `<tr><td class="num">${y.year}</td><td class="num">${(y.nav0 / 10000).toFixed(1)}</td><td class="num">${(y.nav1 / 10000).toFixed(1)}</td><td class="num ${upDown(y.nav1 / y.nav0 - 1)}">${pctSign((y.nav1 / y.nav0 - 1) * 100, 1)}</td><td class="num">${(y.div / 10000).toFixed(2)}</td><td class="num">${(y.invest / 10000).toFixed(1)}</td></tr>`).join('')}</tbody>
-    </table></div>
-  </section>
+  ${fold('syear', '年度数据', `${r.yearly.filter((y) => y.nav1 > 0).length} 年 · 累计收益 / 分红 / 回本率 / 年度 vs 指数 · 4 图 + 明细`, yearSectionStock(r))}
+
+  ${fold('sdiv', '分红明细', `总分红 <b class="num divc">${bigMoney(r.totalDiv)}</b> · ${divTrades.length} 笔 · ${divYears} 个年度 · 增速 ${st.divCagr == null ? '—' : pctSign(st.divCagr * 100, 1) + '/年'} · 分红率 ${pct(divRate, 1)} · 回报本金 ${pct((r.totalDiv / Math.max(1, btState.capital)) * 100, 0)}`, divSectionStock(r))}
 
   ${fold('flow', '买入流水', `${r.trades.length} 笔 · 每一次买入的日期、股数、价格`, flowTable(r.trades))}
   ${fold('rules', '本次回测规则', '4 条 · 可审计', investRules())}`;
+}
+
+/* ---- 个股页：年度数据（4 图 + 明细） ---- */
+
+function yearSectionStock(r) {
+  const years = r.yearly.filter((y) => y.nav1 > 0);
+  const capital = r.nav[0]?.[1] || 1;
+  let cumDiv = 0;
+  const tbl = years.map((y) => {
+    const ret = y.nav0 > 0 ? (y.nav1 / y.nav0 - 1) * 100 : null;
+    const cashPct = y.nav1 > 0 ? (y.cash / y.nav1) * 100 : null;
+    cumDiv += y.div;
+    const repay = (cumDiv / Math.max(1, capital)) * 100;
+    return `<tr><td class="num">${y.year}</td><td class="num">${(y.nav0 / 10000).toFixed(1)}</td><td class="num">${(y.nav1 / 10000).toFixed(1)}</td><td class="num ${upDown(ret)}">${pctSign(ret, 1)}</td><td class="num divc">${(y.div / 10000).toFixed(2)}</td><td class="num divc">${(cumDiv / 10000).toFixed(2)}</td><td class="num">${repay.toFixed(0)}%</td><td class="num">${pctSign(cashPct, 0)}</td><td class="num">${(y.invest / 10000).toFixed(1)}</td></tr>`;
+  }).join('');
+  return `<div class="bt-year-grid">
+    <div class="bt-year-cell"><div class="bt-year-title">累计收益</div><div id="syYear" class="chart" style="height:240px"></div></div>
+    <div class="bt-year-cell"><div class="bt-year-title">分红</div><div id="syDiv" class="chart" style="height:240px"></div></div>
+    <div class="bt-year-cell"><div class="bt-year-title">回本率（累计分红 ÷ 本金）</div><div id="syRepay" class="chart" style="height:240px"></div></div>
+    <div class="bt-year-cell"><div class="bt-year-title">当年股息率（分红 ÷ 年末市值）</div><div id="syCash" class="chart" style="height:240px"></div></div>
+  </div>
+  <div class="table-wrap" style="margin-top:10px"><table class="table">
+    <thead><tr><th>年</th><th>年初(万)</th><th>年末(万)</th><th>今年收益</th><th>分红(万)</th><th>分红累计(万)</th><th>回本%</th><th>年末现金%</th><th>追加(万)</th></tr></thead>
+    <tbody>${tbl}</tbody>
+  </table></div>`;
+}
+
+function drawStockYearCharts() {
+  const r = ctx.stock;
+  if (!r) return;
+  const capital = r.nav[0]?.[1] || btState.capital;
+  const nav = r.nav;
+  drawLineMini(document.getElementById('syYear'), nav.map(([d, v]) => [d, +((v / capital - 1) * 100).toFixed(2)]), { yFmt: (v) => v.toFixed(0) + '%', markLine: { silent: true, symbol: 'none', lineStyle: { color: '#65707e' }, data: [{ yAxis: 0 }] } });
+  drawDivChart(document.getElementById('syDiv'), r.divByY);
+  {
+    // 阶梯点直接由 yearly 累出来，不再逐日扫：年末跳一档，最后一年补到区间最后一天
+    const ys = r.yearly.filter((y) => y.nav1 > 0);
+    const lastDate = nav[nav.length - 1][0];
+    let cum = 0;
+    const rows = [[nav[0][0], 0]];
+    for (const y of ys) {
+      if (y.div > 0) {
+        rows.push([`${y.year}-01-01`, +((cum / capital) * 100).toFixed(2)]);
+        cum += y.div;
+        rows.push([`${y.year}-12-31`, +((cum / capital) * 100).toFixed(2)]);
+      }
+    }
+    rows.push([lastDate, +((cum / capital) * 100).toFixed(2)]);
+    drawLineMini(document.getElementById('syRepay'), rows, { yFmt: (v) => v.toFixed(0) + '%', color: chartColors().div });
+  }
+  // 当年股息率：分红 ÷ 年末市值。比「现金占比」有用得多——个股页现金本来就是零头
+  drawLineMini(document.getElementById('syCash'), r.yearly.filter((y) => y.nav1 > 0).map((y) => [`${y.year}-12-31`, +(y.nav1 > 0 ? (y.div / y.nav1) * 100 : 0).toFixed(2)]), { yFmt: (v) => v.toFixed(1) + '%', color: chartColors().buy });
+}
+
+/* ---- 个股页：分红明细（年度汇总 + 逐笔） ---- */
+
+function divSectionStock(r) {
+  const rows = r.trades.filter((t) => t.type === '分红复投' || t.type === '分红');
+  const byY = new Map();
+  for (const t of rows) {
+    const y = t.date.slice(0, 4);
+    if (!byY.has(y)) byY.set(y, { n: 0, amt: 0, shares: 0, dps: 0 });
+    const o = byY.get(y);
+    o.n += 1;
+    o.amt += t.div != null ? t.div : (t.amount || 0);
+    o.shares += t.type === '分红复投' ? (t.shares || 0) : 0;
+    o.dps += t.dps || 0;
+  }
+  const years = [...byY.keys()].sort();
+  const yTbl = years.map((y) => {
+    const o = byY.get(y);
+    return `<tr><td class="num">${y}</td><td class="num">${o.n} 笔</td><td class="num">${o.dps.toFixed(4)}</td><td class="num divc">${(o.amt / 10000).toFixed(2)}</td><td class="num">${o.shares.toLocaleString('zh-CN')}</td></tr>`;
+  }).join('');
+  const dTbl = rows.slice().reverse().map((t) => `<tr><td class="num">${t.date}</td><td class="num">${(t.dps || 0).toFixed(4)}</td><td class="num divc">${(((t.div != null ? t.div : t.amount) || 0) / 10000).toFixed(2)}</td><td class="num">${t.type === '分红复投' ? (t.shares || 0).toLocaleString('zh-CN') : '<span class="dim">不够一手</span>'}</td><td class="num">${t.price ? t.price.toFixed(2) : '—'}</td></tr>`).join('');
+  return `<div class="panel-body" style="padding:8px 10px 4px"><div id="stDivChart" class="chart" style="height:280px"></div></div>
+  <div class="table-wrap" style="margin-top:6px"><table class="table">
+    <thead><tr><th>年</th><th>派息次数</th><th>每股合计(元)</th><th>到账(万)</th><th>再投股数</th></tr></thead>
+    <tbody>${yTbl}</tbody>
+  </table></div>
+  <div class="table-wrap" style="margin-top:14px"><table class="table">
+    <thead><tr><th>除权除息日</th><th>每股派(元)</th><th>到账(万)</th><th>再投股数</th><th>再投价</th></tr></thead>
+    <tbody>${dTbl}</tbody>
+  </table></div>`;
 }
 
 /* ---------------- 组合对比 ---------------- */
@@ -751,14 +893,15 @@ function renderStockPage(market, structureData) {
 function renderCompare(market, structureData) {
   const from = clampFrom(btState.from);
   const to = btState.to;
-  const rows = ctx.compareRows || [];
+  const rows = (ctx.compareRows || []).filter((x) => !x.empty);   // 没选出股票的组合不参与排名
   const bench = ctx.compareBench;
-  const lowVol = ctx.compareLowVol;
   const benchCagr = bench ? bench.cagr : null;
   const best = rows.length ? [...rows].sort((a, b) => b.end - a.end)[0] : null;
   const safest = rows.length ? [...rows].sort((a, b) => b.mdd - a.mdd)[0] : null;
   const table = rows.map((x) => {
-    const excess = benchCagr != null && x.cagr != null ? (x.cagr - benchCagr) * 100 : null;
+    // 基准行不跟自己比：vs 指数、跑赢年数都留空
+    const excess = x.isIndex ? null : (benchCagr != null && x.cagr != null ? (x.cagr - benchCagr) * 100 : null);
+    const win = x.isIndex ? '—' : winYears(x.nav, bench?.rows);
     return `<tr>
       <td class="name"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${x.color};margin-right:6px"></span>${esc(x.name)}</td>
       <td class="num">${bigMoney(x.end)}</td>
@@ -766,16 +909,17 @@ function renderCompare(market, structureData) {
       <td class="num down">${pct(x.mdd * 100, 0)}</td>
       <td class="num">${x.div == null ? '—' : bigMoney(x.div)}</td>
       <td class="num ${upDown(excess)}">${excess == null ? '—' : (excess >= 0 ? '+' : '') + excess.toFixed(1) + 'pp'}</td>
-      <td class="num">${winYears(x.nav, bench?.rows)}</td>
+      <td class="num">${win}</td>
     </tr>`;
   }).join('');
   return `
   ${paramBar({ tabs: false })}
+  ${ctx.compareNote ? `<div class="banner" style="margin-bottom:12px">${icon('alert')}<div>${esc(ctx.compareNote)}</div></div>` : ''}
   <section class="panel fade-in">
     <div class="panel-head"><span class="panel-title">组合对比</span><span class="section-note">同一本金 ${bigMoney(btState.capital)} · 同一区间 · 同一口径</span></div>
     <div class="panel-body" style="padding:10px 10px 4px">
       <div id="cmpChart" class="chart" style="height:380px"></div>
-      <div class="bt-hint" style="padding:4px">每个方案按自己的目标权重复投；红利策略为每年 4 月按股息率选前 20 只等权调仓；指数为全收益口径</div>
+      <div class="bt-hint" style="padding:4px">每个方案按自己的目标权重复投；红利策略为每年 4 月按股息率选前 20 只等权调仓（分红按上一年度合计均摊 12 个月）；指数为全收益口径；曲线为月末净值</div>
     </div>
   </section>
   <section class="panel fade-in" style="margin-top:14px">
@@ -842,11 +986,14 @@ export async function renderBacktest() {
     btState.from = addYears(btState.to, -10);
   }
   const s = structure();
+  // 组合对比要从全市场里选股（红利策略那一行），没有股票池就一个也选不出来，
+  // 以前这里没调 loadPool，pool 是空的 → 策略静默变成空组合 → 99.9 万 / -0.0%。
+  if (btState.mode === 'cmp') await loadPool();
   const planCodes = btState.mode === 'cmp' ? loadPlans().flatMap((p) => (p.holdings || []).map((h) => h.code)) : [];
   const codes = [...new Set([...s.holdings.map((h) => h.code), ...planCodes, btState.stock])];
   // 只拉当前组合/方案里那几只的分红；组合增删改后再进来，这里会补下新增那几只
   await ensureDividends(codes);
-  const needFinance = btState.mode === 'cmp' || (btState.mode === 'stock' && btState.quality);
+  const needFinance = btState.mode === 'stock' && btState.quality;
   const market = await loadMarket(codes, clampFrom(btState.from), btState.to, {
     finance: needFinance,
     monthly: 'auto',
@@ -861,12 +1008,15 @@ export async function renderBacktest() {
   if (btState.mode === 'stock') {
     body = renderStockPage(market, s);
   } else if (btState.mode === 'cmp') {
+    // 勾了哪几个方案才画哪几个（btState.cmpPlans === null 表示全选）
+    const want = (id) => !btState.cmpPlans || btState.cmpPlans.includes(id);
     const plans = [{ id: 'current', name: s.name || '当前持仓', holdings: s.holdings, lots: s.lots, cash: s.cash }];
     for (const p of loadPlans()) {
       if (p.id === btState.planId) continue;
+      if (!want(p.id)) continue;
       plans.push({ id: p.id, name: p.name, holdings: p.holdings.map((h) => ({ code: h.code, weight: Number(h.weight) || 0 })), lots: [], cash: 0 });
     }
-    if (btState.planId !== 'current') {
+    if (btState.planId !== 'current' && want(btState.planId)) {
       const hit = loadPlans().find((p) => p.id === btState.planId);
       if (hit) plans.unshift({ id: hit.id, name: hit.name, holdings: hit.holdings.map((h) => ({ code: h.code, weight: Number(h.weight) || 0 })), lots: [], cash: 0 });
     }
@@ -877,7 +1027,10 @@ export async function renderBacktest() {
       seen.add(p.name);
       uniqPlans.push(p);
     }
-    const COLORS = ['#d8a84e', '#ef5b60', '#5b9cf5', '#35b57a', '#a78bfa', '#e8a33d', '#22b8cf'];
+    // 方案色：第 1 个是当前持仓，用「净值红」当主角；其余避开语义色（红/青/紫），
+    // 免得跟两条指数搅在一起。红利策略单独用「辅助金」——它是规则不是持仓。
+    const CC = chartColors();
+    const COLORS = [CC.nav, '#5b9cf5', '#35b57a', '#f783ac', '#22b8cf', '#a3e635', '#f9a8a8'];
     const rows = [];
     const b0 = runPortfolioBacktest({
       dates: market.dates, series: market.series, dividends: db.baseline.dividends || {},
@@ -893,31 +1046,45 @@ export async function renderBacktest() {
       });
       rows.push({ kind: 'plan', name: p.name, color: COLORS[i % COLORS.length], nav: r.nav, end: r.end, cagr: r.stats.cagr, mdd: r.stats.mdd, div: r.totalDiv, width: 2 });
     });
-    const plan = runPlanBacktest({
-      baseline: db.baseline,
-      months: market.marketMonths || market.months,
-      benchmark: db.benchmark,
-      finHistory: market.finHistory,
-      params: {
-        startYear: Number(clampFrom(btState.from).slice(0, 4)) + 1,
-        endYm: btState.to.slice(0, 7),
-        holdN: 20, minDy: 4, minDivYears: 3, quality: true,
-      },
+    // 红利策略：选股用「每年 4 月末收盘价」（cmp-yearly，78KB）跑一遍，
+    // 拿到 10 年选中的成分股，再只拉这几十只的完整月线（每只 2.3KB）算净值。
+    // 这样净值/回撤是月频精确的，而不用下 6.4MB 全市场月线。
+    const strategyParams = {
+      startYear: Number(clampFrom(btState.from).slice(0, 4)) + 1,
+      endYm: btState.to.slice(0, 7),
+      holdN: 20, minDy: 4, minDivYears: 3, quality: true,
+    };
+    const screenMonths = await loadCmpScreen();
+    const cmpFin = await loadCmpFin();
+    const pass1 = runPlanBacktest({
+      baseline: db.baseline, months: screenMonths, screenMonths, benchmark: db.benchmark,
+      finHistory: cmpFin, params: strategyParams,
     });
+    const picked = [...new Set(pass1.periods.flatMap((x) => (x.items || []).map((it) => it.code)))];
+    const fullMonths = await loadMonthlyFor(picked);
+    const plan = runPlanBacktest({
+      baseline: db.baseline, months: fullMonths, screenMonths, benchmark: db.benchmark,
+      finHistory: cmpFin, params: strategyParams,
+    });
+    const noPick = !pass1.periods.length || pass1.periods.every((x) => !x.items.length);
     rows.push({
       kind: 'rule',
-      name: `红利策略(${plan.params.holdN}只)`, color: '#7dd3fc',
+      name: `红利策略(${plan.params.holdN}只)`, color: chartColors().sub,
       nav: plan.nav.map((pt) => [monthEnd(pt.ym), +(btState.capital * pt.nav).toFixed(2)]),
-      end: btState.capital * (1 + plan.stats.total), cagr: plan.stats.cagr, mdd: plan.stats.mdd, div: null, width: 1.3,
+      end: btState.capital * (1 + plan.stats.total), cagr: plan.stats.cagr, mdd: plan.stats.mdd, div: null, width: 1.6,
+      empty: noPick,
     });
-    if (b0.bench) rows.push({ kind: 'bench', name: '中证红利全收益', color: '#8b93a1', nav: b0.bench.rows, end: b0.bench.end, cagr: b0.bench.cagr, mdd: maxDrawdown(b0.bench.rows).mdd, div: null, width: 1.1 });
-    if (b0.lowVol) rows.push({ kind: 'bench', name: '红利低波全收益', color: '#a78bfa', nav: b0.lowVol.rows, end: b0.lowVol.end, cagr: b0.lowVol.cagr, mdd: maxDrawdown(b0.lowVol.rows).mdd, div: null, width: 1 });
+    if (b0.bench) rows.push({ kind: 'bench', name: '中证红利全收益', color: chartColors().bench, nav: b0.bench.rows, end: b0.bench.end, cagr: b0.bench.cagr, mdd: maxDrawdown(b0.bench.rows).mdd, div: null, width: 1.3, isIndex: true });
+    if (b0.lowVol) rows.push({ kind: 'bench', name: '红利低波全收益', color: chartColors().lowvol, nav: b0.lowVol.rows, end: b0.lowVol.end, cagr: b0.lowVol.cagr, mdd: maxDrawdown(b0.lowVol.rows).mdd, div: null, width: 1.4, isIndex: true });
     // 方案很多时给策略/指数留位置：最多 5 个方案，其余名额归基准行
     const planRows = rows.filter((r) => r.kind === 'plan');
     const restRows = rows.filter((r) => r.kind !== 'plan');
     ctx.compareRows = [...planRows.slice(0, 5), ...restRows].slice(0, 8);
     ctx.compareBench = b0.bench;
     ctx.compareLowVol = b0.lowVol;
+    ctx.compareNote = noPick
+      ? '红利策略这一行没选出任何股票（股票池或选股财报没加载成功），所以是一条水平线，不代表策略本身不赚钱。'
+      : '';
     body = renderCompare(market, s);
   } else {
     body = renderPort(market, s);
@@ -931,7 +1098,7 @@ export async function renderBacktest() {
   return `<div class="page-head fade-in">
     <div>
       <h1 class="page-title">回测</h1>
-      <div class="page-sub">组合回测 / 个股回测 / 组合对比 · 日 K + 月线 · 基准中证红利全收益</div>
+      <div class="page-sub">组合回测 / 个股回测 / 组合对比 · 日 K + 月线 · 基准中证红利 / 红利低波</div>
     </div>
     <div class="page-actions">${modeTabs()}</div>
   </div>
@@ -991,10 +1158,23 @@ export function bindBacktest() {
     if (s && s.total > 0) { btState.capital = Math.round(s.total / 10000) * 10000; rerender(); }
   };
   document.querySelectorAll('[data-q]').forEach((b) => {
-    b.onclick = () => { btState.from = addYears(btState.to, -Number(b.dataset.q)); rerender(); };
+    // 先收下没提交的输入，否则刚改的本金/日期会被这一步重渲染悄悄冲掉
+    b.onclick = () => { readParams(); btState.from = addYears(btState.to, -Number(b.dataset.q)); rerender(); };
   });
   document.querySelectorAll('[data-add]').forEach((b) => {
-    b.onclick = () => { btState.monthlyAdd = Number(b.dataset.add); rerender(); };
+    b.onclick = () => { readParams(); btState.monthlyAdd = Number(b.dataset.add); rerender(); };
+  });
+  document.querySelectorAll('[data-cmpplan]').forEach((b) => {
+    b.onclick = () => {
+      const all = loadPlans().map((p) => p.id);
+      const id = b.dataset.cmpplan;
+      if (id === '__all') { btState.cmpPlans = null; rerender(); return; }
+      const cur = btState.cmpPlans ? [...btState.cmpPlans] : [...all];
+      const i = cur.indexOf(id);
+      if (i >= 0) cur.splice(i, 1); else cur.push(id);
+      btState.cmpPlans = cur.length === all.length ? null : cur;
+      rerender();
+    };
   });
   const search = document.getElementById('stSearch');
   if (search) {
@@ -1055,13 +1235,15 @@ export function bindBacktest() {
     }
     if (play) play.onclick = () => {
       if (compTimer) { stopCompPlay(); return; }
+      // 滑轨默认停在最后一天：这时候点「播放」原地就结束，看着像按钮坏了。从头播。
+      if (idx >= p.comp.length - 1) { idx = 0; if (range) range.value = '0'; paint(); }
       play.textContent = '暂停 ⏸';
       compTimer = setInterval(() => {
         idx++;
         if (idx >= p.comp.length) { idx = p.comp.length - 1; stopCompPlay(); }
         if (range) range.value = String(idx);
         paint();
-      }, 90);
+      }, 55);
     };
     paint();
   }
@@ -1112,6 +1294,8 @@ export function bindBacktest() {
       const id = d.dataset.fold;
       if (id === 'divhist' && ctx.port) drawDivChart(document.getElementById('divHist'), ctx.port.divByY);
       if (id === 'year') drawYearCharts();
+      if (id === 'syear') drawStockYearCharts();
+      if (id === 'sdiv') drawDivChart(document.getElementById('stDivChart'), ctx.stock?.divByY);
     });
   });
 }
@@ -1119,7 +1303,9 @@ export function bindBacktest() {
 function readParams() {
   const from = document.getElementById('btFrom')?.value;
   const to = document.getElementById('btTo')?.value;
-  const capW = Number(document.getElementById('btCap')?.value);
+  const capEl = document.getElementById('btCap');
+  // 持仓回放时本金框是置灰的（本金 = 起点市值），别把它当用户输入校验
+  const capW = capEl && !capEl.disabled ? Number(capEl.value) : btState.capital / 10000;
   const mon = Number(document.getElementById('btMon')?.value);
   const minDyEl = document.getElementById('btMinDy');
   const minDy = minDyEl ? Number(minDyEl.value) : 5;
@@ -1139,11 +1325,10 @@ function readParams() {
   // 把归一化后的合法值回写输入框（日期会被 clamp 到有数据的起点）
   const fromEl = document.getElementById('btFrom');
   const toEl = document.getElementById('btTo');
-  const capEl = document.getElementById('btCap');
   const monEl = document.getElementById('btMon');
   if (fromEl) fromEl.value = btState.from;
   if (toEl) toEl.value = btState.to;
-  if (capEl) capEl.value = btState.capital / 10000;
+  if (capEl && !capEl.disabled) capEl.value = btState.capital / 10000;
   if (monEl) monEl.value = btState.monthlyAdd;
   if (minDyEl) minDyEl.value = btState.minDy;
   if (rerenderHook) rerenderHook();
@@ -1152,8 +1337,14 @@ function readParams() {
 
 function drawStockPageCharts() {
   const r = ctx.stock;
+  if (!r) return;
   // 净值曲线是重点，直接画；日 K 在折叠里，展开时才画（见 bindBacktest 的 toggle）
-  drawNavChart(document.getElementById('stNav'), { nav: r.nav, bench: r.bench, dd: drawdownOf(r.nav), capital: btState.capital });
+  drawNavChart(document.getElementById('stNav'), {
+    nav: r.nav, bench: r.bench, lowVol: r.lowVol, dd: drawdownOf(r.nav),
+    divByY: r.divByY, capital: btState.capital,
+  });
+  const wfEl = document.getElementById('wfChart');
+  if (wfEl) drawWaterfall(wfEl, { capital: btState.capital, add: Math.max(0, r.totalIn - btState.capital), div: r.totalDiv, end: r.end });
   const klineFold = document.querySelector('[data-fold="kline"]');
   if (klineFold && klineFold.open) drawStockKline();
 }
@@ -1180,11 +1371,6 @@ function drawStockKline() {
     for (const [d, c] of s.dates.map((d, i) => [d, s.closes[i]])) {
       if (d >= clampFrom(btState.from)) candleRows.push([d, c]);
     }
-  }
-  for (const [y, amt] of Object.entries(r.divByY)) {
-    if (!(amt > 0)) continue;
-    const p = priceAt(ctx.market.series.get(btState.stock), `${y}-04-30`);
-    if (p > 0) marks.push({ date: `${y}-04-30`, price: p, kind: 'div', why: `分红 ${(amt / 10000).toFixed(1)}万` });
   }
   drawPriceChart(document.getElementById('stChart'), candleRows, { marks });
 }
@@ -1232,7 +1418,7 @@ function renderStockMetric(key) {
       }
       acc = 0;
       const out = r.nav.map(([d]) => { acc += byDate.get(d) || 0; return [d, +(acc / 10000).toFixed(1)]; });
-      drawMultiLineChart(document.getElementById('msChart'), [{ name: '累计投入(万)', rows: out, color: '#5b9cf5' }], { yFmt: (v) => v.toFixed(0) });
+      drawMultiLineChart(document.getElementById('msChart'), [{ name: '累计投入(万)', rows: out, color: chartColors().buy }], { yFmt: (v) => v.toFixed(0) });
     };
   } else if (key === 'ann') {
     html = base('收益 vs 投入', '总资产 ÷ 累计投入 − 1');
@@ -1244,26 +1430,46 @@ function renderStockMetric(key) {
       }
       let acc = 0;
       const out = r.nav.map(([d, v]) => { acc += byDate.get(d) || 0; return [d, acc > 0 ? +((v / acc - 1) * 100).toFixed(1) : 0]; });
-      drawMultiLineChart(document.getElementById('msChart'), [{ name: '相对投入的盈亏%', rows: out, color: '#d8a84e' }], { yFmt: (v) => v.toFixed(0) + '%' });
+      drawMultiLineChart(document.getElementById('msChart'), [{ name: '相对投入的盈亏%', rows: out, color: chartColors().nav }], { yFmt: (v) => v.toFixed(0) + '%' });
     };
   } else if (key === 'dd') {
     html = base('回撤（水下）', '距历史最高点');
-    drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [{ name: '回撤%', rows: drawdownOf(r.nav), color: '#ef5b60' }], { yFmt: (v) => v.toFixed(0) + '%' });
+    drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [{ name: '回撤%', rows: drawdownOf(r.nav), color: chartColors().dd }], { yFmt: (v) => v.toFixed(0) + '%' });
   } else if (key === 'div') {
-    html = base('年度分红', '每年 4 月末到账，当天再买回');
+    html = base('年度分红', '按除权除息日真实到账日复投，不够一手留现金');
     drawFn = () => drawDivChart(document.getElementById('msChart'), r.divByY);
   } else if (key === 'hold') {
     html = base('分红再投 vs 不复投', '同本金、同区间；不复投那份分红进现金');
     drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [
-      { name: '分红再投', rows: navW(r.nav), color: '#d8a84e' },
-      { name: '分红不复投', rows: navW(r.navHold || []), color: '#5b9cf5', opacity: 0.85 },
+      { name: '分红再投', rows: navW(r.nav), color: chartColors().nav },
+      { name: '分红不复投', rows: navW(r.navHold || []), color: chartColors().buy, opacity: 0.85 },
     ], { yFmt: (v) => v.toFixed(0) });
   } else if (key === 'bench') {
-    html = base('这只股票 vs 中证红利全收益', `同本金、同${perYearAdd > 0 ? '定投节奏' : '区间'}`);
-    drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [
-      { name: nameOf(r.code), rows: navW(r.nav), color: '#d8a84e' },
-      { name: '中证红利全收益', rows: (r.bench?.rows || []).map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: '#8b93a1', opacity: 0.9 },
-    ], { yFmt: (v) => v.toFixed(0) });
+    html = base('这只股票 vs 两条红利指数', `同本金、同${perYearAdd > 0 ? '定投节奏' : '区间'}`);
+    drawFn = () => {
+      const C = chartColors();
+      const series = [
+        { name: nameOf(r.code), rows: navW(r.nav), color: C.nav },
+        { name: '中证红利全收益', rows: (r.bench?.rows || []).map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: C.bench },
+      ];
+      if (r.lowVol?.rows?.length) series.push({ name: '中证红利低波全收益', rows: r.lowVol.rows.map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: C.lowvol });
+      drawMultiLineChart(document.getElementById('msChart'), series, { yFmt: (v) => v.toFixed(0) });
+    };
+  } else if (key === 'payback') {
+    html = base('回本进度', '累计分红 ÷ 本金，越过 100% 就是分红把本金还完了');
+    drawFn = () => {
+      let cum = 0;
+      const rows = r.nav.map(([d]) => {
+        const y = d.slice(0, 4);
+        const hit = r.divByY?.[y];
+        if (hit && d.slice(5, 10) >= '12-30') { cum += hit; }
+        return [d, +((cum / Math.max(1, btState.capital)) * 100).toFixed(2)];
+      });
+      drawMultiLineChart(document.getElementById('msChart'), [{ name: '回本%', rows, color: chartColors().div }], {
+        yFmt: (v) => v.toFixed(0) + '%',
+        markLine: { silent: true, symbol: 'none', lineStyle: { color: '#65707e', opacity: 0.5 }, data: [{ yAxis: 100 }] },
+      });
+    };
   }
   box.innerHTML = html;
   if (drawFn) requestAnimationFrame(() => setTimeout(drawFn, 20));
@@ -1279,6 +1485,23 @@ function drawdownOf(nav) {
   return out;
 }
 
+/** 回本率曲线：按引擎记的「真实分红到账日」累加。
+    不假设 4 月末、不按年度阶梯——events 里 type==='分红' 的 date 就是除权除息日。 */
+function repayCurve(p, nav, capital) {
+  const evs = (p.events || [])
+    .filter((e) => e.type === '分红' && e.amount > 0)
+    .map((e) => [e.date, e.amount])
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  let j = 0;
+  let cum = 0;
+  const rows = [];
+  for (const [d] of nav) {
+    while (j < evs.length && evs[j][0] <= d) { cum += evs[j][1]; j++; }
+    rows.push([d, +((cum / capital) * 100).toFixed(2)]);
+  }
+  return rows;
+}
+
 function renderMetric(key) {
   const box = document.getElementById('metricDetail');
   if (!box) return;
@@ -1290,39 +1513,32 @@ function renderMetric(key) {
   let drawFn = null;
   if (key === 'nav') {
     html = `<section class="panel"><div class="panel-head"><span class="panel-title">总资产曲线</span><span class="section-note">持仓市值 + 现金（含分红）</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
-    drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [{ name: '总资产(万)', rows: nav.map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: '#d8a84e' }], { yFmt: (v) => v.toFixed(0) + '万' });
+    drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [{ name: '总资产(万)', rows: nav.map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: chartColors().nav }], { yFmt: (v) => v.toFixed(0) + '万' });
   } else if (key === 'ann') {
     html = `<section class="panel"><div class="panel-head"><span class="panel-title">累计收益</span><span class="section-note">(净值 ÷ 本金 − 1)</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
-    drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [{ name: '累计收益%', rows: nav.map(([d, v]) => [d, +((v / capital - 1) * 100).toFixed(1)]), color: '#d8a84e' }], { yFmt: (v) => v.toFixed(0) + '%' });
+    drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [{ name: '累计收益%', rows: nav.map(([d, v]) => [d, +((v / capital - 1) * 100).toFixed(1)]), color: chartColors().nav }], { yFmt: (v) => v.toFixed(0) + '%' });
   } else if (key === 'navR') {
     html = `<section class="panel"><div class="panel-head"><span class="panel-title">分红不复投</span><span class="section-note">分红全部留现金、不再买入</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
     drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [
-      { name: '复投(万)', rows: p.nav.map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: '#d8a84e' },
-      { name: '不复投(万)', rows: p.navR.map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: '#c9a227', opacity: 0.75 },
+      { name: '复投(万)', rows: p.nav.map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: chartColors().nav },
+      { name: '不复投(万)', rows: p.navR.map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: chartColors().sub, opacity: 0.8 },
     ], { yFmt: (v) => v.toFixed(0) });
   } else if (key === 'dd') {
     html = `<section class="panel"><div class="panel-head"><span class="panel-title">回撤（水下）</span><span class="section-note">距历史最高点</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
-    drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [{ name: '回撤%', rows: p.dd, color: '#ef5b60' }], { yFmt: (v) => v.toFixed(0) + '%' });
+    drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [{ name: '回撤%', rows: p.dd, color: chartColors().dd }], { yFmt: (v) => v.toFixed(0) + '%' });
   } else if (key === 'div') {
-    html = `<section class="panel"><div class="panel-head"><span class="panel-title">年度分红</span><span class="section-note">每年 4 月末到账 · 柱 + 累计线</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
+    html = `<section class="panel"><div class="panel-head"><span class="panel-title">年度分红</span><span class="section-note">按真实除权除息日到账 · 柱 + 累计线</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
     drawFn = () => drawDivChart(document.getElementById('mChart'), p.divByY);
   } else if (key === 'repay') {
-    let cum = 0;
-    const rows = [];
-    const byY = { ...p.divByY };
-    for (const [d, v] of nav) {
-      const y = d.slice(0, 4);
-      if (byY[y] && d >= y + '-04-28') { cum += byY[y]; delete byY[y]; }
-      rows.push([d, +((cum / capital) * 100).toFixed(2)]);
-    }
-    html = `<section class="panel"><div class="panel-head"><span class="panel-title">回本率</span><span class="section-note">累计分红 ÷ 本金</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
-    drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [{ name: '回本率%', rows, color: '#c9a227' }], { yFmt: (v) => v.toFixed(0) + '%' });
+    const rows = repayCurve(p, nav, capital);
+    html = `<section class="panel"><div class="panel-head"><span class="panel-title">回本率</span><span class="section-note">累计分红 ÷ 本金 · 按真实除权除息日到账</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
+    drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [{ name: '回本率%', rows, color: chartColors().div }], { yFmt: (v) => v.toFixed(0) + '%' });
   } else if (key === 'hold') {
     html = `<section class="panel"><div class="panel-head"><span class="panel-title">组合 vs 买入持有 vs 指数</span><span class="section-note">同一本金、同一区间</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
     drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [
-      { name: '我的组合', rows: nav.map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: '#d8a84e' },
-      { name: '买入持有', rows: (ctx.holdNav || []).map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: '#5b9cf5', opacity: 0.8 },
-      { name: '中证红利全收益', rows: (p.bench?.rows || []).map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: '#8b93a1', opacity: 0.8 },
+      { name: '我的组合', rows: nav.map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: chartColors().nav },
+      { name: '买入持有', rows: (ctx.holdNav || []).map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: chartColors().buy, opacity: 0.85 },
+      { name: '中证红利全收益', rows: (p.bench?.rows || []).map(([d, v]) => [d, +(v / 10000).toFixed(1)]), color: chartColors().bench, opacity: 0.9 },
     ], { yFmt: (v) => v.toFixed(0) });
   }
   box.innerHTML = html;
@@ -1338,15 +1554,9 @@ function drawYearCharts() {
     chYear: () => drawLineMini(document.getElementById('chYear'), nav.map(([d, v]) => [d, +((v / capital - 1) * 100).toFixed(2)]), { yFmt: (v) => v.toFixed(0) + '%', markLine: { silent: true, symbol: 'none', lineStyle: { color: '#65707e' }, data: [{ yAxis: 0 }] } }),
     chDiv: () => drawDivChart(document.getElementById('chDiv'), p.divByY),
     chRepay: () => {
-      let cum = 0;
-      const rows = [];
-      const byY = { ...p.divByY };
-      for (const [d, v] of nav) {
-        const y = d.slice(0, 4);
-        if (byY[y] && d >= y + '-04-28') { cum += byY[y]; delete byY[y]; }
-        rows.push([d, +((cum / capital) * 100).toFixed(2)]);
-      }
-      drawLineMini(document.getElementById('chRepay'), rows, { yFmt: (v) => v.toFixed(0) + '%', color: '#c9a227' });
+      // 按引擎记的真实分红到账日累加（不假设 4 月末，也不做年度阶梯）
+      const rows = repayCurve(p, nav, capital);
+      drawLineMini(document.getElementById('chRepay'), rows, { yFmt: (v) => v.toFixed(0) + '%', color: chartColors().div });
     },
     chCash: () => {
       const rows = p.comp.map(([d, row]) => {

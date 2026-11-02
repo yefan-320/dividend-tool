@@ -82,8 +82,13 @@ function yearsFrom(ev) {
 }
 
 async function main() {
+  /* 取 codes 的来源必须是「所有有分红记录的股票」，不能只看 pool：
+     pool 只有 5552 只（北交所 920xxx 不在里面），漏掉就永远没有 ev，
+     回测里那些股票会一股分红都不派。 */
   const pool = JSON.parse(fs.readFileSync(POOL, 'utf8'));
-  let codes = ONLY || Object.keys(pool).filter((c) => /^\d{6}$/.test(c));
+  const baseline = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'baseline.json'), 'utf8'));
+  const allDiv = Object.keys(baseline.dividends || {});
+  let codes = ONLY || [...new Set([...Object.keys(pool), ...allDiv])].filter((c) => /^\d{6}$/.test(c));
   if (LIMIT) codes = codes.slice(0, LIMIT);
   console.log(`拉 ${codes.length} 只的分红明细…`);
 

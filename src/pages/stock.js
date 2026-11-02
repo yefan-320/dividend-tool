@@ -1,4 +1,4 @@
-import { db, loadDaily, loadMonthly, loadDyPct, loadFinanceExtra, quote, nameOf, divSummary, dataMeta, ensureDividends } from '../data.js';
+import { db, loadDaily, loadDyPct, loadFinanceExtra, quote, nameOf, divSummary, dataMeta, ensureDividends } from '../data.js';
 import { drawPriceChart } from '../charts.js';
 import { isWatched, toggleWatch } from '../store.js';
 import { openBuyModal } from '../ui/buy.js';
@@ -261,6 +261,6 @@ export async function renderStock() {
   ${realChart}
   <div style="margin-top:14px" class="banner">
     ${icon('info')}
-    <div>财报覆盖 ${dataMeta().finCount} / ${dataMeta().poolCount}。没有财报的股票，四层因子只算分红、价格两项，结论固定「数据不足」，不输出买卖。</div>
+    <div>财报覆盖 ${dataMeta().finCount}${dataMeta().poolCount ? ' / ' + dataMeta().poolCount : ' 只'}。没有财报的股票，四层因子只算分红、价格两项，结论固定「数据不足」，不输出买卖。</div>
   </div>`;
 }

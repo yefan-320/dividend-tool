@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { withEv } from './div-helper.js';
 import assert from 'node:assert/strict';
 import { runPortfolioBacktest } from '../src/engine/portfolioBacktest.js';
 
@@ -113,11 +114,11 @@ test('staged months=1 ≈ once（期数 1 时退化为一次买齐）', () => {
 });
 
 test('staged 预留本金不被提前花掉：4 月末高额分红只复投分红，后面两期照常投', () => {
-  // 单票 100%、股价 10 元平盘、2019 年度每股分红 5 元（2020-04-30 到账）
+  // 单票 100%、股价 10 元平盘、2019 年度每股分红 5 元，除息日 2020-04-30
   const r = runPortfolioBacktest({
     dates,
     series: new Map([['A', { dates: ['2019-06-03', ...dates], closes: [10, 10, 10, 10, 10, 10] }]]),
-    dividends: { A: { years: { 2019: 5 } } },
+    dividends: { A: { years: { 2019: 5 }, ev: [['2020-04-30', 5]] } },
     holdings: [{ code: 'A', weight: 100 }],
     capital: 1000000, monthlyAdd: 0, from: dates[0], to: dates.at(-1), mode: 'invest',
     entry: { mode: 'staged', months: 4 },

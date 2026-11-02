@@ -26,6 +26,7 @@ import assert from 'node:assert/strict';
 
 import { planActionRows } from '../src/engine/plan.js';
 import { runPortfolioBacktest } from '../src/engine/portfolioBacktest.js';
+import { withEv } from './div-helper.js';
 
 /* ---------------- 工具 ---------------- */
 const DAY_RATE = 0.015 / 365;
@@ -231,6 +232,7 @@ function refPortfolio({ dates, series, dividends = {}, holdings = [], capital = 
   const nav = [];
   const navR = [];
   const comp = [];
+  const evPtrRef = new Map();
   const flowsN = [[dates[0], -capital]];
   const flowsR = [[dates[0], -capital]];
   const entryOut = { mode: e.mode, months: e.months, minDy: e.minDy, installments: [], triggered: {}, neverTriggered: [] };
@@ -353,22 +355,30 @@ function refPortfolio({ dates, series, dividends = {}, holdings = [], capital = 
       if (cash > 0) cash *= 1 + DAY_RATE * days;
       if (cashR > 0) cashR *= 1 + DAY_RATE * days;
     }
-    if (isAprEnd) {
+    {
+      // 只认 ev：没有除权日的分红一律不计（和引擎同一口径）
       let paid = 0;
       for (const h of active) {
-        const dps = prevDpsRef(dividends, h.code, y);
-        if (!(dps > 0)) continue;
-        const n = sh.get(h.code) || 0;
-        if (n > 0) { cash += n * dps; paid += n * dps; divByCode[h.code] = (divByCode[h.code] || 0) + n * dps; }
-        const nR = shR.get(h.code) || 0;
-        if (nR > 0) cashR += nR * dps;
+        const evs = dividends?.[h.code]?.ev || [];
+        let ptr = evPtrRef.get(h.code);
+        if (ptr === undefined) { ptr = 0; while (ptr < evs.length && evs[ptr][0] <= date) ptr++; evPtrRef.set(h.code, ptr); continue; }
+        while (ptr < evs.length && evs[ptr][0] <= date) {
+          const dps = evs[ptr][1];
+          ptr++;
+          if (!(dps > 0)) continue;
+          const n = sh.get(h.code) || 0;
+          if (n > 0) { cash += n * dps; paid += n * dps; divByCode[h.code] = (divByCode[h.code] || 0) + n * dps; }
+          const nR = shR.get(h.code) || 0;
+          if (nR > 0) cashR += nR * dps;
+        }
+        evPtrRef.set(h.code, ptr);
       }
-      if (paid > 0) { divByY[y] = (divByY[y] || 0) + paid; yearDiv += paid; events.push({ date, type: '分红', amount: paid, why: `${y - 1} 年度分红到账` }); }
+      if (paid > 0) { divByY[y] = (divByY[y] || 0) + paid; yearDiv += paid; events.push({ date, type: '分红', amount: paid, why: '除权除息日分红到账' }); }
     }
     if (monthlyAdd > 0 && (isAprEnd || isDecEnd)) {
       const amt = monthlyAdd * 6;
       cash += amt; cashR += amt; yearAdds += amt;
-      flowsN.push([date, amt]); flowsR.push([date, amt]);
+      flowsN.push([date, -amt]); flowsR.push([date, -amt]);
       events.push({ date, type: '追加', amount: amt, why: '月追加（6 个月）' });
     }
     if (isStaged && i > 0 && stagedDone > 0 && stagedDone < months && monthEnd) {
@@ -714,7 +724,7 @@ test('差分：staged 6 期 + 中途分红——逐月 nav/现金/installments/e
   });
   const r = diffPortfolioCase({
     name: 'staged6', dates, series,
-    dividends: { AAA: { years: { 2019: 0.6, 2020: 0.5 } }, BBB: { years: { 2019: 1.2, 2020: 1.0 } } },
+    dividends: withEv({ AAA: { years: { 2019: 0.6, 2020: 0.5 } }, BBB: { years: { 2019: 1.2, 2020: 1.0 } } }),
     holdings: [{ code: 'AAA', weight: 60 }, { code: 'BBB', weight: 40 }],
     entry: { mode: 'staged', months: 6 },
   });
@@ -745,7 +755,7 @@ test('差分：staged 80% 股票 + 月追加——计划现金与追加资金都
   });
   const r = diffPortfolioCase({
     name: 'staged80+add', dates, series,
-    dividends: { AAA: { years: { 2019: 0.6, 2020: 0.5 } } },
+    dividends: withEv({ AAA: { years: { 2019: 0.6, 2020: 0.5 } } }),
     holdings: [{ code: 'AAA', weight: 50 }, { code: 'BBB', weight: 30 }],
     monthlyAdd: 10000,
     entry: { mode: 'staged', months: 4 },
@@ -792,7 +802,7 @@ test('差分：dip 触发/跌价后触发/无分红 neverTriggered——nav、ev
   });
   const r = diffPortfolioCase({
     name: 'dip 门槛', dates, series,
-    dividends: { AAA: { years: { 2018: 1, 2019: 1 } }, BBB: { years: { 2018: 1, 2019: 1 } } },
+    dividends: withEv({ AAA: { years: { 2018: 1, 2019: 1 } }, BBB: { years: { 2018: 1, 2019: 1 } } }),
     holdings: [{ code: 'AAA', weight: 40 }, { code: 'BBB', weight: 40 }, { code: 'CCC', weight: 20 }],
     monthlyAdd: 10000,
     entry: { mode: 'dip', minDy: 5.5 },
@@ -818,7 +828,7 @@ test('差分：dip 已知 DPS 口径——1–3 月用 Y-2、4 月后才有 Y-1�
   const series = mkFolioSeries({ AAA: { dates, pre: '2016-06-30', fn: () => 20 } });
   const r = diffPortfolioCase({
     name: 'dip DPS口径', dates, series,
-    dividends: { AAA: { years: { 2018: 0.5, 2019: 2 } } },
+    dividends: withEv({ AAA: { years: { 2018: 0.5, 2019: 2 } } }),
     holdings: [{ code: 'AAA', weight: 100 }],
     entry: { mode: 'dip', minDy: 5.5 },
   });
@@ -836,7 +846,7 @@ test('差分：dip 全部不触发 + 无行情股票进 pending（不进 neverTr
   const series = mkFolioSeries({ AAA: { dates, pre: '2016-06-30', fn: () => 30 } }); // 1 元 DPS → 3.3% < 5.5%
   const r = diffPortfolioCase({
     name: 'dip 全不触发', dates, series,
-    dividends: { AAA: { years: { 2018: 1 } } },
+    dividends: withEv({ AAA: { years: { 2018: 1 } } }),
     holdings: [{ code: 'AAA', weight: 50 }, { code: 'NODATA', weight: 50 }],
     entry: { mode: 'dip', minDy: 5.5 },
   });
@@ -858,7 +868,7 @@ test('差分：once + 月追加——4/12 月末各入 6 个月，totalIn/end/ca
   });
   const r = diffPortfolioCase({
     name: 'once+add', dates, series,
-    dividends: { AAA: { years: { 2018: 0.5, 2019: 0.6, 2020: 0.55 } }, BBB: { years: { 2018: 1, 2019: 1.1, 2020: 1.05 } } },
+    dividends: withEv({ AAA: { years: { 2018: 0.5, 2019: 0.6, 2020: 0.55 } }, BBB: { years: { 2018: 1, 2019: 1.1, 2020: 1.05 } } }),
     holdings: [{ code: 'AAA', weight: 55 }, { code: 'BBB', weight: 45 }],
     monthlyAdd: 10000,
     entry: { mode: 'once' },

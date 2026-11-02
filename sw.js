@@ -10,8 +10,8 @@
    首屏和离线外壳都不需要它，放进 SHELL 会让「装好、离线可用」多等约 40% 的下载。
    改由页面空闲时发 warm-charts 消息补缓存（见 WARM / warmAll），
    没补上也不影响在线画图——外壳的 fetch 处理器会把首次取到的文件顺手缓存。 */
-const SHELL_CACHE = 'hongli-shell-v1.6.1';
-const DATA_CACHE = 'hongli-data-v2';
+const SHELL_CACHE = 'hongli-shell-v1.8.0';
+const DATA_CACHE = 'hongli-data-v3';
 /** 数据和代码分开放；数据量大又天天变，不该被代码改版连坐 */
 const cacheNameFor = (u) => (/\/data\//.test(u) || /\/vendor\//.test(u) ? DATA_CACHE : SHELL_CACHE);
 const SHELL = [
@@ -84,7 +84,14 @@ self.addEventListener('fetch', (e) => {
       const cache = await caches.open(cacheNameFor(url.pathname));
       const hit = await cache.match(req);
       const net = fetch(req).then((res) => { if (res.ok) cache.put(req, res.clone()); return res; }).catch(() => null);
-      return hit || (await net) || new Response('{}', { status: 503, headers: { 'Content-Type': 'application/json' } });
+      if (hit) return hit;
+      const res = await net;
+      if (res) return res;
+      // ⚠ 不要用 `{}` 冒充成功。以前这里返回 503 + 空 JSON 体，
+      // 上层 loadMonthly 拿到 `{}` 就当成功，把空数据永久记进 db.monthly，
+      // 于是组合对比里的「红利策略」静默变成空组合（99.9 万 / -0.0%）。
+      // 直接报错，让上层 catch 得到、页面才知道该提示什么。
+      return Response.error();
     })());
     return;
   }

@@ -139,7 +139,7 @@ function addForm() {
     <div class="panel-head"><span class="panel-title">添加买入</span><span class="section-note">存本地 · 不联网</span></div>
     <div class="panel-body">
       <div class="tx-form">
-        <label><span>日期</span><input class="input" type="date" id="txDate" value="${today()}"></label>
+        <label><span>日期</span><input class="input" type="date" id="txDate" max="${today()}" value="${today()}"></label>
         <label><span>代码</span><input class="input" id="txCode" placeholder="6 位代码" maxlength="6" value="000333"></label>
         <label><span>股数</span><input class="input" type="number" id="txShares" step="100" min="1" value="1000"></label>
         <label><span>成本价</span><input class="input" type="number" id="txPrice" step="0.01" min="0" value="${q?.p ?? 0}"></label>
@@ -201,7 +201,7 @@ function settingsView() {
       <div>红利工具 <b>v1.0.0</b> · 本地离线版</div>
       <div>数据源：新浪行情 / 腾讯日 K 月线 / 东财财报 / 中证指数全收益基准</div>
       <div>决策框架：质量闸门（亏损、支付率、现金流覆盖、股息率异常）→ 股息率门槛，不给预测、只给条件。</div>
-      <div>回测口径：不复权价格 + 现金分红、4 月末到账、不含税与佣金；组合回测含未上市建仓规则。</div>
+      <div>回测口径：不复权价格 + 现金分红、<b>每笔按真实除权除息日到账</b>、不含税与佣金；组合回测含未上市建仓规则。</div>
     </div>
   </section>`;
 }
@@ -283,6 +283,8 @@ export function bindMine() {
       const price = Number(document.getElementById('txPrice')?.value);
       if (!/^\d{6}$/.test(code)) return toast('请填 6 位股票代码');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return toast('请选择买入日期');
+      // 和「买入弹窗」同一口径（ui/buy.js 会拦未来日期）：两套入口不能一个拦一个放
+      if (date > today()) return toast('买入日期不能晚于今天');
       if (!(shares > 0) || !(price > 0)) return toast('股数和成本价要大于 0');
       const { addTx } = await import('../store.js');
       addTx({ date, code, side: 'buy', shares, price, fee: 5 });

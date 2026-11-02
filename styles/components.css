@@ -144,6 +144,15 @@
 }
 .hero-line .thin { font-weight: 400; color: var(--text-2); font-size: 17px; letter-spacing: 0; }
 .hero-desc { margin-top: 8px; font-size: 12.5px; color: var(--text-2); max-width: 640px; }
+/* 一行小胶囊：把「不判买卖点 / 分红当天再投 / 卖出 0 次」拆开，别再糊成一长句 */
+.hero-chips { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.hchip {
+  font-size: 10.5px; line-height: 1.45; padding: 3px 9px; border-radius: 20px;
+  color: var(--text-2); background: var(--surface-2); border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.hchip.bench { color: var(--c-bench); border-color: rgba(46,197,240,.28); background: rgba(46,197,240,.08); }
+.hchip.lowvol { color: var(--c-lowvol); border-color: rgba(167,139,250,.28); background: rgba(167,139,250,.08); }
 
 @media (max-width: 640px) {
   .hero-main { padding: 18px 16px 16px; }
@@ -322,14 +331,15 @@
 .input {
   height: 34px;
   padding: 0 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
   background: var(--surface-2);
   color: var(--text);
   font-size: 12.5px;
+  transition: background .15s, box-shadow .15s;
 }
 .input::placeholder { color: var(--text-3); }
-.input:focus { border-color: var(--accent-line); }
+.input:focus { background: var(--surface-3); border-color: transparent; box-shadow: 0 0 0 2px var(--accent-line); }
 .input.sm { height: 28px; padding: 0 8px; font-size: 11.5px; }
 
 /* ---------- 数据不足提示 ---------- */

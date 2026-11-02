@@ -76,6 +76,13 @@ export function nameIndexReady() {
   return !!ROWS && ROWS.length > 0;
 }
 
+/** 单只股票的静态信息（名字/行业/市值档），来自已经在内存里的索引，不额外下载。
+    索引还没到位就返回 null，调用方降级显示。 */
+export function stockMeta(code) {
+  const r = BY_CODE.get(String(code || ''));
+  return r ? { code: r.code, name: r.name, ind: r.ind, cap: r.cap } : null;
+}
+
 /** 归一化关键词：去空格、转小写 */
 function normKey(kw) {
   return String(kw || '').trim().replace(/\s+/g, '');

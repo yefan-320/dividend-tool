@@ -17,7 +17,6 @@
 .decision-panel .panel-head { background: transparent; }
 
 .hero .stats { background: transparent; }
-.hero .stat-value { color: var(--text); }
 
 /* 分红日历 */
 .calendar {
@@ -68,6 +67,39 @@
 
 /* ============ 个股 ============ */
 .stock-search-wrap { position: relative; z-index: 30; margin-bottom: 14px; }
+
+/* 标的条：现在回测的是哪只股票，一眼看见。左边身份，右边换股。 */
+.sym-bar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  margin-bottom: 12px;
+}
+.sym-main { flex: 1; min-width: 0; }
+.sym-title { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+.sym-name { font-size: 20px; font-weight: 750; letter-spacing: -.4px; }
+.sym-code { font-family: var(--mono); font-size: 12.5px; color: var(--text-3); }
+.sym-tag {
+  font-size: 10.5px; color: var(--text-2); padding: 2px 7px;
+  border-radius: 5px; background: var(--surface-2); line-height: 1.5;
+}
+.sym-meta { margin-top: 4px; font-size: 11px; color: var(--text-3); }
+.sym-pick { position: relative; flex: 0 0 300px; max-width: 300px; }
+/* 三格主图：手机要更高，不然净值那格被压得没起伏 */
+.chart.chart-tall { height: 460px; }
+@media (max-width: 640px) { .chart.chart-tall { height: 520px; } }
+.sym-pick .stock-search { height: 36px; padding: 0 11px; gap: 8px; border: 0; border-radius: 10px; background: var(--surface-2); transition: background .15s, box-shadow .15s; }
+.sym-pick .stock-search:focus-within { background: var(--surface-3); box-shadow: 0 0 0 2px var(--accent-line); }
+.sym-pick .stock-search svg { width: 15px; height: 15px; }
+.sym-pick .stock-search input { font-size: 13px; }
+.sym-pick .search-suggest { background: var(--surface-3); border-color: rgba(255,255,255,.07); box-shadow: 0 16px 40px rgba(0,0,0,.55); }
+@media (max-width: 640px) {
+  .sym-bar { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 14px; }
+  .sym-pick { flex: 1 1 auto; max-width: none; }
+  .sym-name { font-size: 18px; }
+}
 /* 回测页的「换一只」：照 iOS 搜索栏做——整行一条填充底、无边框、放大镜在左 */
 .stock-picker { margin: 0 0 16px; max-width: 560px; }
 .stock-picker .stock-search {
@@ -250,13 +282,13 @@
 .bt-chip:hover { color: var(--text); border-color: var(--line-strong); }
 .bt-chip.on { background: var(--accent); border-color: transparent; color: #17120a; font-weight: 650; }
 [data-theme="light"] .bt-chip.on { color: #fff; }
-.bt-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; margin-top: 14px; background: var(--surface); }
+.bt-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; margin-top: 14px; background: var(--surface); }
 .bt-metric { padding: 12px 13px 11px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; }
 .bt-metric:hover { background: var(--surface-2); }
 .bt-metric.on { box-shadow: inset 0 0 0 1px var(--accent); }
 .bt-metric .k { font-size: 10.5px; color: var(--text-3); white-space: nowrap; }
 .bt-metric .v { margin-top: 4px; font-size: 19px; font-weight: 700; letter-spacing: -.3px; }
-.bt-metric .s { margin-top: 2px; font-size: 10px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bt-metric .s { margin-top: 3px; font-size: 10.5px; line-height: 1.35; color: var(--text-2); min-height: 2.7em; }
 .bt-mini-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; margin-bottom: 10px; }
 .bt-mini-stats > div { background: var(--surface); padding: 10px 12px; }
 .bt-mini-stats .k { font-size: 10px; color: var(--text-3); }
@@ -509,6 +541,8 @@
 .bt-field.bt-check input { width: 14px; height: 14px; accent-color: var(--accent); }
 .bt-field.bt-check span { font-size: 11px; color: var(--text-2); }
 
-/* 语义色：分红永远是青的（图里图外一个色），净值金、基准灰、回撤红、买入/投入蓝 */
-.bt-metric .v.divc, .stat-value.divc, .divc.num { color: #ef5b60; }
-.bt-metric .v.ddc, .stat-value.ddc, .ddc.num { color: #f0883e; }
+/* 语义色：同一个概念，图里图外必须同色。色值只在 tokens.css 定一次。 */
+.bt-metric .v.divc, .stat-value.divc, .divc.num { color: var(--c-div); }
+.bt-metric .v.ddc, .stat-value.ddc, .ddc.num { color: var(--c-dd); }
+.bt-metric .v.fund, .stat-value.fund, .fund.num { color: var(--c-fund); }
+.bt-metric .v.gold, .stat-value.gold, .gold.num { color: var(--c-nav); }

@@ -1,10 +1,12 @@
 import test from 'node:test';
+import { withEv } from './div-helper.js';
 import assert from 'node:assert/strict';
 import { runStockBacktest } from '../src/engine/stockBacktest.js';
 
 const dates = ['2020-01-02', '2020-04-30', '2020-12-31', '2021-04-30', '2021-12-31'];
 const series = { dates, closes: [10, 10, 10, 10, 10] };
-const dividends = { A: { years: { 2019: 1, 2020: 1 } } };
+// 分红只认 ev（真实除权除息日）：years 只服务股息率判断，不再折算成「4 月末到账」
+const dividends = { A: { years: { 2019: 1, 2020: 1 }, ev: [['2020-12-31', 1], ['2021-12-31', 1]] } };
 const fin = { A: [[2019, 2, 12, 20, 50, 2.5], [2020, 2, 12, 20, 50, 2.5]] };
 
 test('个股回测：股息率 ≥ 5% 且质量过关 → 4 月末买入', () => {

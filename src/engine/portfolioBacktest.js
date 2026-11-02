@@ -2,7 +2,7 @@
  * 组合回测引擎（纯函数，无 DOM）。
  *
  * 两种模式：
- *  - invest：把「本金」在起点按目标结构买入，持有到终点；每年 4 月末分红到账、分红复投，
+ *  - invest：把「本金」在起点按目标结构买入，持有到终点；每笔分红按真实除权除息日到账、当天复投，
  *            4/12 月末可月追加。对照口径 = 分红不复投（进现金）。
  *  - replay：按「当前持仓股数」从起点持有（假设自起点起就是这个组合），分红复投 / 不复投。
  *
@@ -23,7 +23,7 @@
  *            nav 仍 = 现金 + 持仓，nav[0] = capital）；
  *            满期后预留归零，末值≈本金。
  *  - dip：起点和每个月末检查「已知最近年度每股分红 ÷ 当日价」，≥ minDy%（默认 5.5）才买；
- *         已知 DPS 口径：4–12 月用 Y-1 年度，1–3 月用 Y-2 年度（Y-1 年度分红 Y 年 4 月末才到账）；
+ *         已知 DPS 口径（只服务股息率判断）：4–12 月用 Y-1 年度，1–3 月用 Y-2 年度；
  *         触发后按目标权重（当前总资产 × w%）补到目标，只买不卖、100 股整手；
  *         不摊未上市份额、不做等权再平衡；分红复投 / 月追加同样受股息率门槛约束。
  *
@@ -134,7 +134,8 @@ export function buildBenchmark({ dates, rows, capital, monthlyAdd, from, to, flo
     if (monthlyAdd > 0 && monthEnd && (mm === '04' || mm === '12')) {
       const amt = monthlyAdd * 6;
       units += amt / useP;
-      flowsOut.push([d, amt]);
+      // 现金流：投进去的钱是流出，记负号。记成正号会让 XIRR 把追加当收益，年化虚高好几倍
+      flowsOut.push([d, -amt]);
     }
     out.push([d, units * useP]);
   }
@@ -220,6 +221,7 @@ export function runPortfolioBacktest(o) {
     mode, from, to, dates,
     nav: result.nav, navR: result.navR, dd, ddR,
     comp: result.comp, events: result.events, divByY: result.divByY, divByCode: result.divByCode,
+    divMissing: result.divMissing || [],
     yearly: result.yearly, builds: result.builds, pending: result.pending,
     entry: entryOut,
     totalDiv, totalIn, end, endR, cashEnd: result.cashEnd,
@@ -450,7 +452,8 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
 
   /**
    * 已知最近年度每股分红（元/股）：
-   * Y-1 年度分红 Y 年 4 月末才到账，所以 Y 年 1–3 月只能看 Y-2 年度，4–12 月看 Y-1 年度。
+   * 年报分红一般次年 4 月后到账，所以 Y 年 1–3 月只能看 Y-2 年度，4–12 月看 Y-1 年度。
+   * 注意：这只影响「股息率估算」，跟分红入账无关——入账一律看 data/div 的 ev 除权日。
    */
   const knownDps = (code, date) => {
     const years = dividends?.[code]?.years;
@@ -562,6 +565,10 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
   let yearDiv = 0;
   let yearAdds = 0;
   let yearCash = null;
+  /* 每只股票的分红事件指针：按「真实除权除息日」逐笔到账，不再假设每年 4 月末统一发。
+     ev 缺的股票在回测里完全不派息，并记进 divMissing 让页面说清楚。 */
+  const evPtr = new Map();
+  const divMissing = new Set();
 
   for (let i = 0; i < dates.length; i++) {
     const date = dates[i];
@@ -584,25 +591,46 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
       if (cashR > 0) cashR *= 1 + DAY_RATE * days;
     }
 
-    // 分红到账（Y-1 年度，Y 年 4 月末）
-    if (isAprEnd) {
+    // 分红到账：每笔按自己的除权除息日入账；没有 ev 的股票不计（进 divMissing）
+    {
       let paid = 0;
-      for (const c of active) {
-        const dps = prevDps(dividends, c, y);
-        if (!(dps > 0)) continue;
+      const payTo = (c, dps, tag) => {
+        if (!(dps > 0)) return;
         const n = sh.get(c) || 0;
         if (n > 0) {
-          cash += n * dps;
-          paid += n * dps;
-          divByCode[c] = (divByCode[c] || 0) + n * dps;
+          const amt = n * dps;
+          cash += amt;
+          paid += amt;
+          divByCode[c] = (divByCode[c] || 0) + amt;
         }
         const nR = shR.get(c) || 0;
         if (nR > 0) cashR += nR * dps;
+      };
+      for (const c of active) {
+        const evs = dividends?.[c]?.ev;
+        if (!Array.isArray(evs) || !evs.length) {
+          // 没有派息明细 = 这只股票在回测里完全不派息。不猜日期、不编「4 月末」。
+          divMissing.add(c);
+          continue;
+        }
+        let ptr = evPtr.get(c);
+        if (ptr === undefined) {
+          // 第一次遇到这只股票：建仓日之前的分红不算
+          ptr = 0;
+          while (ptr < evs.length && evs[ptr][0] <= date) ptr++;
+          evPtr.set(c, ptr);
+          continue;
+        }
+        while (ptr < evs.length && evs[ptr][0] <= date) {
+          payTo(c, evs[ptr][1]);
+          ptr++;
+        }
+        evPtr.set(c, ptr);
       }
       if (paid > 0) {
         divByY[y] = (divByY[y] || 0) + paid;
         yearDiv += paid;
-        events.push({ date, type: '分红', amount: paid, why: `${y - 1} 年度分红到账` });
+        events.push({ date, type: '分红', amount: paid, why: '除权除息日分红到账' });
       }
     }
 
@@ -612,8 +640,9 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
       cash += amt;
       cashR += amt;
       yearAdds += amt;
-      flowsN.push([date, amt]);
-      flowsR.push([date, amt]);
+      // 现金流记负：这是从口袋里掏出去的钱。记正号 XIRR 会把它当收益，年化虚高 2~4 倍
+      flowsN.push([date, -amt]);
+      flowsR.push([date, -amt]);
       events.push({ date, type: '追加', amount: amt, why: '月追加（6 个月）' });
     }
 
@@ -722,6 +751,7 @@ function runInvest({ codes, wOf, totalW, cashPct, dates, series, dividends, capi
 
   return {
     nav, navR, comp, yearly, events, divByY, divByCode, builds, pending,
+    divMissing: [...divMissing],
     flowsN, flowsR, cashEnd: cash, entry: entryOut,
   };
 }
@@ -767,6 +797,8 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
   let yearDiv = 0;
   let yearAdds = 0;
   let yearCash = cash0;
+  const evPtrR = new Map();
+  const divMissing = new Set();
   for (let i = 0; i < dates.length; i++) {
     const date = dates[i];
     const y = Number(date.slice(0, 4));
@@ -785,9 +817,21 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
       if (cash > 0) cash *= 1 + DAY_RATE * days;
       if (cashR > 0) cashR *= 1 + DAY_RATE * days;
     }
-    if (isAprEnd) {
+    {
+      // 每笔按自己的除权除息日；没明细的股票一律不计（divMissing 里记一笔）
+      const due = [];
       for (const c of codesAll) {
-        const dps = prevDps(dividends, c, y);
+        const evs = dividends?.[c]?.ev;
+        if (!Array.isArray(evs) || !evs.length) {
+          divMissing.add(c);
+          continue;
+        }
+        let ptr = evPtrR.get(c);
+        if (ptr === undefined) { ptr = 0; while (ptr < evs.length && evs[ptr][0] <= date) ptr++; evPtrR.set(c, ptr); continue; }
+        while (ptr < evs.length && evs[ptr][0] <= date) { due.push([c, evs[ptr][1], `${evs[ptr][0]} 除息（复投本股）`]); ptr++; }
+        evPtrR.set(c, ptr);
+      }
+      for (const [c, dps, why] of due) {
         if (!(dps > 0)) continue;
         const n = shN.get(c) || 0;
         const amt = n * dps;
@@ -803,7 +847,7 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
           divByY[y] = (divByY[y] || 0) + amt;
           divByCode[c] = (divByCode[c] || 0) + amt;
           yearDiv += amt;
-          events.push({ date, type: '分红', amount: amt, code: c, why: `${y - 1} 年度分红（复投本股）` });
+          events.push({ date, type: '分红', amount: amt, code: c, why });
         }
       }
     }
@@ -812,8 +856,9 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
       cash += amt;
       cashR += amt;
       yearAdds += amt;
-      flowsN.push([date, amt]);
-      flowsR.push([date, amt]);
+      // 同上：追加是流出，记负号
+      flowsN.push([date, -amt]);
+      flowsR.push([date, -amt]);
       events.push({ date, type: '追加', amount: amt, why: '月追加（6 个月）' });
     }
     const v = cash + valueAt(date, shN);
@@ -832,5 +877,5 @@ function runReplay({ codes, wOf, dates, series, dividends, lots, cash0, capital,
   if (lastYear != null) {
     yearly.push({ year: lastYear, nav0: yearNav0, nav1: nav[nav.length - 1]?.[1] ?? null, div: yearDiv, cash: yearCash ?? 0, invest: yearAdds });
   }
-  return { nav, navR, comp, yearly, events, divByY, divByCode, builds: [], pending: [], flowsN, flowsR, cashEnd: cash };
+  return { nav, navR, comp, yearly, events, divByY, divByCode, builds: [], pending: [], flowsN, flowsR, cashEnd: cash, divMissing: [...divMissing] };
 }

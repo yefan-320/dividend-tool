@@ -23,6 +23,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { runPortfolioBacktest, buildBenchmark } from '../src/engine/portfolioBacktest.js';
+import { withEv } from './div-helper.js';
 import {
   monthEnd, buildSeries, buildTradingDates, priceAt, isMonthEnd, lastDateOfMonth, prevDps,
   qualityOf, dyQuality, annualize, maxDrawdown, sharpeOf, xirr,
@@ -79,6 +80,7 @@ function refAnnualize(totalRet, from, to) {
 
 /* ================= 参考实现 A：replay ================= */
 function refReplay({ codes, dates, series, dividends = {}, lots = [], cash0 = 0, monthlyAdd = 0, capital, from, to, entry = null }) {
+  const evPtrR = new Map();
   const px = (code, date) => priceAtRef(series.get(code), date);
   const base = new Map();
   for (const lot of lots) {
@@ -119,31 +121,40 @@ function refReplay({ codes, dates, series, dividends = {}, lots = [], cash0 = 0,
       if (cash > 0) cash *= 1 + DAY_RATE * days;
       if (cashR > 0) cashR *= 1 + DAY_RATE * days;
     }
-    if (isAprEnd) {
+    {
+      // 只认 ev（和引擎同一口径）
       for (const c of codesAll) {
-        const dps = prevDpsRef(dividends, c, y);
-        if (!(dps > 0)) continue;
-        const n = shN.get(c) || 0;
-        const amt = n * dps;
-        const p = px(c, date);
-        if (amt > 0 && p > 0) {
-          const buy = Math.floor(amt / p / 100) * 100;
-          shN.set(c, n + buy);
-          cash += amt - buy * p;
-        } else cash += amt;
-        cashR += (shR.get(c) || 0) * dps;
-        if (amt > 0) {
-          divByY[y] = (divByY[y] || 0) + amt;
-          divByCode[c] = (divByCode[c] || 0) + amt;
-          yearDiv += amt;
-          events.push({ date, type: '分红', amount: amt, code: c, why: `${y - 1} 年度分红（复投本股）` });
+        const evs = dividends?.[c]?.ev || [];
+        let ptr = evPtrR.get(c);
+        if (ptr === undefined) { ptr = 0; while (ptr < evs.length && evs[ptr][0] <= date) ptr++; evPtrR.set(c, ptr); continue; }
+        while (ptr < evs.length && evs[ptr][0] <= date) {
+          const dps = evs[ptr][1];
+          const xd = evs[ptr][0];
+          ptr++;
+          if (!(dps > 0)) continue;
+          const n = shN.get(c) || 0;
+          const amt = n * dps;
+          const p = px(c, date);
+          if (amt > 0 && p > 0) {
+            const buy = Math.floor(amt / p / 100) * 100;
+            shN.set(c, n + buy);
+            cash += amt - buy * p;
+          } else cash += amt;
+          cashR += (shR.get(c) || 0) * dps;
+          if (amt > 0) {
+            divByY[y] = (divByY[y] || 0) + amt;
+            divByCode[c] = (divByCode[c] || 0) + amt;
+            yearDiv += amt;
+            events.push({ date, type: '分红', amount: amt, code: c, why: `${xd} 除息（复投本股）` });
+          }
         }
+        evPtrR.set(c, ptr);
       }
     }
     if (monthlyAdd > 0 && (isAprEnd || isDecEnd)) {
       const amt = monthlyAdd * 6;
       cash += amt; cashR += amt; yearAdds += amt;
-      flowsN.push([date, amt]); flowsR.push([date, amt]);
+      flowsN.push([date, -amt]); flowsR.push([date, -amt]);
       events.push({ date, type: '追加', amount: amt, why: '月追加（6 个月）' });
     }
     const v = cash + valueAt(date, shN);
@@ -194,7 +205,7 @@ function refBuildBenchmark({ dates, rows, capital, monthlyAdd = 0, from, to, flo
     if (monthlyAdd > 0 && monthEnd && (mm === '04' || mm === '12')) {
       const amt = monthlyAdd * 6;
       units += amt / p;
-      flowsOut.push([d, amt]);
+      flowsOut.push([d, -amt]);
     }
     out.push([d, units * p]);
   }
@@ -410,7 +421,7 @@ const RP_SERIES = rpSeries({
   BBB: { pre: '2016-06-30', fn: (i) => 20 + Math.sin(i / 3) * 2 },
   CCC: { pre: '2016-06-30', fn: (i) => 5 + (i % 4) * 0.3 },
 });
-const RP_DIVS = { AAA: { years: { 2018: 0.5, 2019: 0.6, 2020: 0.55 } }, BBB: { years: { 2018: 1, 2019: 1.1, 2020: 1.05 } } };
+const RP_DIVS = withEv({ AAA: { years: { 2018: 0.5, 2019: 0.6, 2020: 0.55 } }, BBB: { years: { 2018: 1, 2019: 1.1, 2020: 1.05 } } });
 
 test('差分：replay 常规（lots+cash0+分红）——nav/navR/comp/div/yearly/events/ret 与参考一致', () => {
   const r = diffReplay({
@@ -646,7 +657,7 @@ test('差分：priceAt / isMonthEnd / lastDateOfMonth / prevDps——周末、�
   assert.equal(lastDateOfMonth(cal, '2019-11'), null);
 
   // prevDps：上一年度为正才算；0 / 负数 / 缺失 → 0
-  const divs = { X: { years: { 2019: 1, 2020: 0, 2021: -2, 2022: 0.5 } } };
+  const divs = withEv({ X: { years: { 2019: 1, 2020: 0, 2021: -2, 2022: 0.5 } } });
   for (const y of [2020, 2021, 2022, 2023, 2024]) assert.equal(prevDps(divs, 'X', y), prevDpsRef(divs, 'X', y), `prevDps(${y})`);
   assert.equal(prevDps(divs, 'X', 2020), 1);
   assert.equal(prevDps(divs, 'X', 2023), 0.5);
@@ -689,7 +700,7 @@ test('差分：market 统计与质量工具（annualize/maxDrawdown/sharpeOf/xir
   }
   assert.deepEqual(qualityOf({}, 'X', 2020), { ok: false, why: '缺财报' });
 
-  const dividends = { X: { years: { 2023: 1.5, 2024: 1.6 } } };
+  const dividends = withEv({ X: { years: { 2023: 1.5, 2024: 1.6 } } });
   const dyCases = [
     { year: 2024, price: 30 },
     { year: 2025, price: 40 },

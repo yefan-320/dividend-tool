@@ -170,13 +170,74 @@ export function finHistoryOf(code) {
 export async function loadMonthly() {
   if (db.monthly) return db.monthly;
   try {
-    const j = await getJson('monthly.json');
-    db.monthly = j.months || {};
+    const j = await getJson('monthly.json', { timeout: 120000 });
+    // 空壳（网络失败被 SW 兜成 {}）不能当「加载成功」，否则会把空数据永久记进 db.monthly
+    if (!j || !j.months || !Object.keys(j.months).length) throw new Error('返回的是空数据');
+    db.monthly = j.months;
   } catch (e) {
-    // 月线 6.5MB 不预缓存、也不进首屏：只有「对比模式的红利策略选股」和「起点早于 2014-06」才会用到它
+    // 月线 6.4MB 不预缓存、也不进首屏：只有「对比模式的红利策略选股」和「起点早于 2014-06」才会用到它
     throw new Error('月线数据没加载成功：只有对比模式的全市场选股、或把回测起点拖到 2014-06 之前才需要这 6.5MB 月线。请联网后重试；只想看自己的组合用日 K 即可，不需要月线。原始错误：' + e.message);
   }
   return db.monthly;
+}
+
+/* ---------------- 组合对比专用的小数据 ----------------
+   那个页面原来要 monthly 6.4MB + finance-history 4.3MB（gzip 3.3MB），
+   手机 30KB/s 下 110 秒、20 秒就超时。其实它需要的只有三样，都由
+   tools/build-cmp-data.mjs 生成：
+     cmp-yearly.json  每年 4 月末收盘价（选股用）          gzip ≈ 78KB
+     cmp-fin.json     选股用的 eps/roe/ocfps               gzip ≈ 257KB
+     monthly/<code>.json  选中那几十只的完整月线（净值用）  每只 2.3KB
+   合计 ≈ 400KB，快十倍。 */
+
+const cmpCache = {};
+
+/** 全市场「每年 4 月末收盘价」→ {code: [[ym, close]]}（稀疏，只服务选股） */
+export async function loadCmpScreen() {
+  if (cmpCache.screen) return cmpCache.screen;
+  const j = await getJson('cmp-yearly.json', { timeout: 45000 });
+  if (!j || !j.d) throw new Error('对比数据没加载成功（cmp-yearly.json）');
+  const years = j.y || [];
+  const out = {};
+  for (const [code, arr] of Object.entries(j.d)) {
+    const rows = [];
+    for (let i = 0; i < arr.length; i++) if (arr[i] != null) rows.push([years[i] + '-04', arr[i]]);
+    if (rows.length) out[code] = rows;
+  }
+  cmpCache.screen = out;
+  return out;
+}
+
+/** 选股用的财报（只含 eps / roe / ocfps），格式与 finance-history 的 6 槽一致 */
+export async function loadCmpFin() {
+  if (cmpCache.fin) return cmpCache.fin;
+  const j = await getJson('cmp-fin.json', { timeout: 45000 });
+  if (!j || !j.c) throw new Error('对比数据没加载成功（cmp-fin.json）');
+  const out = {};
+  for (const [code, rows] of Object.entries(j.c)) {
+    // [年, eps, roe, 净利率, 负债率, ocfps] —— 中间两槽选股用不到，占位 null
+    out[code] = rows.map((r) => [r[0], r[1], r[2], null, null, r[3]]);
+  }
+  cmpCache.fin = out;
+  return out;
+}
+
+/** 指定股票的完整月线（data/monthly/<code>.json，每只约 2.3KB）
+ *
+ * 返回的是「请求的这些股票里所有能拿到的」，不只是本次新下载的：
+ * 页面重渲染时会再问一遍，若只回新下载的，第二次就全是空的（净值曲线会变成一条水平线）。 */
+export async function loadMonthlyFor(codes) {
+  const uniq = [...new Set((codes || []).map(String))].filter((c) => /^\d{6}$/.test(c));
+  cmpCache.mon = cmpCache.mon || {};
+  const todo = uniq.filter((c) => !cmpCache.mon[c]);
+  for (let i = 0; i < todo.length; i += 12) {
+    await Promise.all(todo.slice(i, i + 12).map(async (c) => {
+      try { cmpCache.mon[c] = await getJson(`monthly/${c}.json`, { timeout: 15000 }); } catch (e) { /* 缺一只不影响整页 */ }
+    }));
+  }
+  const out = {};
+  for (const c of uniq) if (cmpCache.mon[c]) out[c] = cmpCache.mon[c];
+  return out;
 }
 
 /* ---------------- 日 K（联网按需 + 本地回退） ---------------- */
@@ -326,12 +387,25 @@ export function dividendsOf(code) {
 
 /* 分红索引：baseline.dividends 有 5400+ 只，今天页/选股页每次渲染都要扫全池。
    预先摊平成 Map（一次 O(n)），避免反复 Object.keys + filter + sort。
-   baseline 对象被整体替换时自动重建。 */
+
+   ⚠ 失效判断必须用版本号，不能用对象身份：db.baseline 从不整体替换，
+   只往 db.baseline.dividends 里塞属性（loadPool / ensureDividends），
+   引用永远不变。以前判 `=== db.baseline`，索引就停在第一次建立那一刻——
+   先看个股页（只加载 1 只分红）再进今天页，全市场候选会塌成 0 只。 */
 
 let divIndexCache = null;
+let divRev = 0;   // 每往 db.baseline.dividends 写一次就 +1
+
+/** 分红数据变了：作废索引，下次取用重建 */
+function touchDividends() {
+  divRev++;
+}
 
 function divIndex() {
-  if (divIndexCache && divIndexCache.baseline === db.baseline) return divIndexCache.map;
+  // 两道判据都要过：版本号（属性追加，生产路径）与对象身份（整体替换，测试/重置路径）
+  if (divIndexCache && divIndexCache.rev === divRev && divIndexCache.baseline === db.baseline) {
+    return divIndexCache.map;
+  }
   const map = new Map();
   for (const [code, d] of Object.entries(db.baseline?.dividends || {})) {
     const years = d.years || {};
@@ -348,7 +422,7 @@ function divIndex() {
     }
     map.set(code, { years, nYears: ys.length, consecutive, firstY: ys[0], lastY, dps: years[lastY] });
   }
-  divIndexCache = { baseline: db.baseline, map };
+  divIndexCache = { rev: divRev, baseline: db.baseline, map };
   return map;
 }
 
@@ -411,8 +485,18 @@ export async function loadPool() {
       if (base) {
         db.baseline.f10 = base.f10 || {};
         db.baseline.holdings = base.holdings || [];
-        // 今天页要全市场算股息率，全量分红还是要的；但只给这两个页面用
-        if (base.dividends) Object.assign(db.baseline.dividends, base.dividends);
+        // 今天页要全市场算股息率，全量分红还是要的；但只给这两个页面用。
+        //
+        // ⚠ baseline.json 里的 dividends 只有 years（年度合计），没有 ev（逐笔除权日）。
+        // 回测引擎只认 ev，直接灌进来会让回测「一分分红都不算」。所以：
+        //   · 已经有该股（ensureDividends 先拉过，带 ev）→ 一个字段都不许覆盖
+        //   · 没有该股 → 灌 years 占位，ev 留给 ensureDividends 按需补
+        const cur = db.baseline.dividends;
+        for (const [code, d] of Object.entries(base.dividends || {})) {
+          if (!cur[code]) cur[code] = d;
+          else if (cur[code].years == null && d.years) cur[code].years = d.years;
+        }
+        touchDividends();
       }
       db.baseline.poolReady = true;
       return db.baseline;
@@ -428,8 +512,10 @@ export async function loadPool() {
  * 已经拉过的跳过，新加的股票才发请求。用户改完组合再进回测，只会补下新增那几只。
  */
 export async function ensureDividends(codes) {
-  if (db.baseline.poolReady) return db.baseline.dividends;   // 已经全量拉过就不用再补
-  const todo = [...new Set((codes || []).map(String))].filter((c) => /^\d{6}$/.test(c) && !divDone.has(c));
+  // 不要因为「池子加载过」就跳过：loadPool 灌进来的 years 没有 ev，
+  // 而回测只认 ev。这里靠 divDone 去重，缺 ev 的照样补拉（每只几 KB）。
+  const todo = [...new Set((codes || []).map(String))]
+    .filter((c) => /^\d{6}$/.test(c) && !divDone.has(c) && !hasEv(c));
   for (let i = 0; i < todo.length; i += 8) {
     await Promise.all(todo.slice(i, i + 8).map(async (c) => {
       try {
@@ -437,8 +523,20 @@ export async function ensureDividends(codes) {
         // years 给股息率/质量用；ev 是每一笔的「除权除息日 + 每股派息」，个股定投靠它按日复投
         if (j && j.years) db.baseline.dividends[c] = { years: j.years, ev: j.ev };
         divDone.add(c);
+        touchDividends();
       } catch (e) { /* 没有分红记录：页面按「无」处理 */ }
     }));
   }
   return db.baseline.dividends;
+}
+
+/** 这只股票的分红里是否已经有逐笔除权日（ev） */
+function hasEv(code) {
+  const d = db.baseline?.dividends?.[code];
+  return !!(d && Array.isArray(d.ev) && d.ev.length);
+}
+
+/** 分红数据里有没有逐笔除权日——回测用它判断「这只到底取到明细没有」 */
+export function hasDivEvents(code) {
+  return hasEv(String(code));
 }

@@ -40,7 +40,15 @@ const { runPortfolioBacktest } = await import(path.join(ROOT, 'src/engine/portfo
 const { bigMoney, pct, pctSign } = await import(path.join(ROOT, 'src/ui/format.js'));
 
 /* ---------- 固定输入（浏览器里用同样的账本/方案） ---------- */
-const TODAY = quotesData.generated; // 2026-10-30
+/* 页面把「今天」定成 db.generated——它取的是行情里最新的 date 字段，
+   而不是快照顶层 generated（盘后可能多一天）。这里必须同口径，否则末值差几个交易日。 */
+const TODAY = (() => {
+  let mx = quotesData.generated || '';
+  for (const q of Object.values(quotesData.quotes || {})) {
+    if (q && q.date && q.date > mx) mx = q.date;
+  }
+  return mx;
+})();
 const [ty, tm, td] = TODAY.split('-').map(Number);
 const FROM = new Date(Date.UTC(ty - 10, tm - 1, td)).toISOString().slice(0, 10);
 const TO = TODAY;
@@ -62,6 +70,22 @@ const MANY_PLANS = [
     entry: { mode: 'once', months: 12, minDy: 5 }, createdAt: '2026-01-01', updatedAt: '2026-01-01',
   })),
 ];
+
+/* 页面 ensureDividends() 会把 data/div/<code>.json 的逐笔派息明细（ev）合进 dividends，
+   引擎按真实除权除息日入账。这里必须同样补上，否则期望值会退回「每年 4 月末」的老口径。 */
+{
+  const all = [...new Set([
+    ...LEDGER.map((t) => t.code),
+    ...PLANS.flatMap((p) => p.holdings.map((h) => h.code)),
+    ...MANY_PLANS.flatMap((p) => p.holdings.map((h) => h.code)),
+  ])];
+  for (const c of all) {
+    try {
+      const d = readJson('div/' + c + '.json');
+      if (d && Array.isArray(d.ev) && d.ev.length) dividends[c] = { ...dividends[c], ev: d.ev };
+    } catch (e) { /* 没有明细的股票走老口径兜底 */ }
+  }
+}
 
 /* ---------- Node 侧期望值（与页面同口径，独立重算） ---------- */
 function addYears(dateStr, n) {
@@ -176,6 +200,9 @@ await send('Page.enable');
 await send('Runtime.enable');
 await send('Network.enable');
 await send('Network.setCacheDisabled', { cacheDisabled: true });
+/* 清掉这个站点的 SW / IndexedDB 行情缓存：页面「今天」取的是行情里最新的 date，
+   缓存把行情推到第二天，末值就会和 Node 侧按快照日算的期望差一两个交易日。 */
+await send('Storage.clearDataForOrigin', { origin: SITE.replace(/\/[^/]*$/, ''), storageTypes: 'indexeddb,service_workers,cache_storage,local_storage' }).catch(() => {});
 
 const BASE = SITE + (SITE.includes('?') ? '&' : '?') + 'offline=1&nosw=1&theme=dark';
 let navSeq = 0;
@@ -326,6 +353,42 @@ cm = cardMap(st.cards);
 const replayText = JSON.stringify(st);
 check('空账本持仓回放不崩、无 NaN/Infinity/undefined', !/NaN|Infinity|undefined/.test(replayText), norm(st.kicker).slice(0, 60));
 check('空账本回放仍显示起点市值一行', !!cm['起点市值'], cm['起点市值'] || '缺行');
+
+/* ---------- 7. 用户真实路径回归（补上以前抓不到的坑） ----------
+   前面几组都自己构造 dividends 并注入 ev，绕过了真实数据加载路径，
+   所以下面这三种「用户一定会走」的路坏了也抓不到。 */
+
+// 7a. 先看个股页（只加载 1 只分红）→ 再进今天页：分红索引缓存必须失效，候选不能塌成 0
+await seed(LEDGER, CASH, PLANS);
+await goto('#stock?code=000001');
+await waitFor(`!!document.querySelector('.page-title')`, '个股页渲染');
+await goto('#today');
+await waitFor(`/可买 \\d+/.test(document.querySelector('.hero-kicker')?.textContent || '')`, '今天页候选统计', 20000);
+const todayKicker = norm(await evalJs(`document.querySelector('.hero-kicker')?.textContent || ''`));
+const buyN = Number((todayKicker.match(/可买 (\d+)/) || [])[1] || 0);
+check('先看个股再进今天页：候选不塌成 0', buyN >= 30, `${todayKicker}（可买 ${buyN} 只；塌成 0 = divIndex 缓存没失效）`);
+
+// 7b. 今天页（全量分红已灌，但那份只有 years、没有 ev）→ 回测个股：分红必须真的算进去
+await goto('#backtest?mode=stock&code=600036');
+await waitFor(`!!document.querySelector('.hero-kicker')`, '个股回测渲染');
+await sleep(2000);
+const stockHero = norm(await evalJs(`document.querySelector('.hero')?.innerText.replace(/\\s+/g, ' ') || ''`));
+const divM = stockHero.match(/分红\s*([\d.]+)\s*万/);
+const divWan = divM ? Number(divM[1]) : 0;
+check('经由今天页进个股回测：分红被算进去（不是 0）', divWan > 50, `分红 ${divWan} 万——0 说明只拿到 years、没拿到 ev`);
+check('经由今天页进个股回测：没有假报「没取到派息明细」', !/没取到.*派息明细|没有派息明细/.test(stockHero), stockHero.slice(0, 80));
+
+// 7c. 组合回测开月追加：年化不能虚高（现金流符号曾记反，20000/月 显示 +38.6%，真值 +9.8%）
+await goto('#backtest');
+await waitFor(`document.querySelectorAll('.hero-kicker').length === 1`, '回测页（定投回归）');
+await evalJs(`document.getElementById('btMon').value = '20000'; document.getElementById('btRun').click();`);
+await sleep(600);
+await waitFor(`document.querySelectorAll('.bt-metric').length > 0`, '定投重跑完成', 20000);
+await sleep(800);
+const addHero = norm(await evalJs(`document.querySelector('.hero')?.innerText.replace(/\\s+/g, ' ') || ''`));
+const cagrM = addHero.match(/年化\s*([+-][\d.]+)%/);
+const cagrN = cagrM ? Number(cagrM[1]) : NaN;
+check('月追加 2 万：年化落在合理区间（现金流符号没记反）', cagrN > 3 && cagrN < 20, `年化 ${cagrN}%；虚高到 30%+ 说明追加资金被记成了流入`);
 
 check('全程无 console.error / 未捕获异常', errors.length === 0, errors.slice(0, 3).join(' | '));
 

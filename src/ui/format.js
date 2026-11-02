@@ -3,25 +3,34 @@ export const esc = s => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+/** 数字归零：-0.04 这类四舍五入后会印成「-0.0」「-0%」，看着像负数其实没有 */
+function unneg(v, d) {
+  const n = Number(v);
+  if (!isFinite(n)) return n;
+  const eps = 0.5 * Math.pow(10, -d);
+  return Math.abs(n) < eps ? 0 : n;
+}
+
 export function num(v, d = 1, fallback = '—') {
   if (v == null || !isFinite(v)) return fallback;
-  return Number(v).toFixed(d);
+  return unneg(v, d).toFixed(d);
 }
 
 export function sign(v, d = 1, fallback = '—') {
-  const s = num(v, d, fallback);
-  if (s === fallback) return s;
-  return (v > 0 ? '+' : '') + s;
+  if (v == null || !isFinite(v)) return fallback;
+  const n = unneg(v, d);
+  return (n > 0 ? '+' : '') + n.toFixed(d);
 }
 
 export function pct(v, d = 1) {
   if (v == null || !isFinite(v)) return '—';
-  return v.toFixed(d) + '%';
+  return unneg(v, d).toFixed(d) + '%';
 }
 
 export function pctSign(v, d = 1) {
   if (v == null || !isFinite(v)) return '—';
-  return (v > 0 ? '+' : '') + v.toFixed(d) + '%';
+  const n = unneg(v, d);
+  return (n > 0 ? '+' : '') + n.toFixed(d) + '%';
 }
 
 export function money(v) {
