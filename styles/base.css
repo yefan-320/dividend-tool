@@ -194,7 +194,6 @@
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-soft);
 }
-.panel-pad { padding: 20px; }
 
 .panel-head {
   display: flex;
@@ -210,10 +209,9 @@
 
 /* 分栏 */
 .split { display: grid; grid-template-columns: 1.55fr 1fr; gap: 16px; }
-.split-even { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
 @media (max-width: 760px) {
-  .split, .split-even { grid-template-columns: 1fr; }
+  .split { grid-template-columns: 1fr; }
 }
 
 /* 通用行 */
@@ -225,9 +223,6 @@
 .row-between { justify-content: space-between; }
 .grow { flex: 1; min-width: 0; }
 
-/* 分隔 */
-.hr { height: 1px; background: var(--line); border: 0; margin: 0; }
-
 /* 空态 */
 .empty {
   padding: 30px 18px;
@@ -236,21 +231,6 @@
   font-size: 12.5px;
 }
 
-/* 骨架 */
-.skeleton {
-  border-radius: 6px;
-  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
-  background-size: 400% 100%;
-  animation: shimmer 1.4s infinite;
-}
-@keyframes shimmer {
-  0% { background-position: 100% 0; }
-  100% { background-position: -100% 0; }
-}
-
-.page-loading{display:flex;align-items:center;gap:10px;justify-content:center;min-height:240px;color:var(--text-3);font-size:12px}
-.page-loading .dot{animation:pulse 1s infinite}
-@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
 
 /* ---------- 窄屏：页头/面板头改为纵向，避免标题被挤成竖排 ---------- */
 @media (max-width: 640px) {

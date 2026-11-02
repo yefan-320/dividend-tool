@@ -154,7 +154,6 @@ input, select { outline: none; }
 .warn { color: var(--warn); }
 .danger { color: var(--danger); }
 
-.hide { display: none !important; }
 
 /* 滚动条 */
 ::-webkit-scrollbar { width: 8px; height: 8px; }

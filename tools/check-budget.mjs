@@ -23,7 +23,10 @@ const gzipSize = (p) => zlib.gzipSync(fs.readFileSync(path.join(ROOT, p)), { lev
 
 const BUDGET = {
   coreDataKB: 420,
-  shellKB: 167, // v1.9.1：回撤体检 v2（TWR + 回撤事件序列）+ 扫描榜删重复统计卡 + 我的页买入记录改网格，+7KB；首屏总量（546/560）仍有余量，下一轮该做代码拆分而不是继续抬上限
+  // v1.9.2 净减：加了页面交互状态层的修复（约 +1.5KB 原文），同时删掉 20 余组零引用死 CSS
+  // （区间条/旧分段控件/旧换一只搜索框/信号列表/旧方案行/日历金额/骨架屏重复定义…），
+  // 一加一减之外还压了一批啰嗦注释，最终 166.7——没抬上限，还留了 0.3KB 余量。
+  shellKB: 167,
   firstLoadKB: 560,
   precacheKB: 620, // SW 安装时后台预缓存总量：ECharts 移出后应约 540KB（以前含图表库是 865KB）
 };

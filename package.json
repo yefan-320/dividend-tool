@@ -1,6 +1,6 @@
 {
   "name": "dividend-tool",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -23,6 +23,7 @@
     "plan-flow": "node tools/check-plan-flow.mjs",
     "offline": "node tools/check-offline.mjs",
     "backtest-modes": "node tools/check-backtest-modes.mjs",
+    "ui-state": "node tools/check-ui-state.mjs",
     "ios": "node tools/check-ios.mjs"
   }
 }

@@ -4,6 +4,9 @@ import { esc } from './format.js';
 let backdrop = null;
 let modal = null;
 let onClose = null;
+let revealRaf = 0;
+let focusTimer = 0;
+let escBound = false;
 
 function ensure() {
   if (backdrop) return;
@@ -14,13 +17,20 @@ function ensure() {
   modal.className = 'modal';
   document.body.appendChild(backdrop);
   document.body.appendChild(modal);
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && backdrop && backdrop.classList.contains('show')) closeModal();
-  });
+  // 只绑一次：以前每开一次弹层就多挂一个 document keydown，关掉不解绑，越开越多。
+  if (!escBound) {
+    escBound = true;
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && backdrop && backdrop.classList.contains('show')) closeModal();
+    });
+  }
 }
 
 export function closeModal() {
   if (!backdrop) return;
+  // 掐掉还在路上的回调：下面会把 backdrop/modal 置空，它们再跑就读 null（实测抛 TypeError）。
+  cancelAnimationFrame(revealRaf);
+  clearTimeout(focusTimer);
   backdrop.classList.remove('show');
   modal.classList.remove('show');
   document.body.classList.remove('modal-open');
@@ -69,13 +79,15 @@ export function openModal({ title, body, actions = [], onMount, width }) {
   // 后台标签页的 requestAnimationFrame 会被浏览器暂停，弹层就永远「不显示」（DOM 在、类不在）。
   // 先同步补一次 show（幂等），rAF 只负责让过渡动画从起点开始。
   const reveal = () => {
+    if (!backdrop || !modal) return;   // 这一帧到达前已经被关掉了
     backdrop.classList.add('show');
     modal.classList.add('show');
     document.body.classList.add('modal-open');
   };
   reveal();
-  requestAnimationFrame(reveal);
-  setTimeout(() => {
+  revealRaf = requestAnimationFrame(reveal);
+  focusTimer = setTimeout(() => {
+    if (!modal) return;
     const first = modal.querySelector('input, select, textarea');
     if (first) first.focus();
   }, 60);

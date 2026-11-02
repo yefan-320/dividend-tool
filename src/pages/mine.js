@@ -427,8 +427,14 @@ export function bindMine() {
         } catch (e) { /* 单个失败继续，最后统一提示 */ }
       }
       prefetchBtn.disabled = false;
-      toast(done === urls.length ? '回测数据已缓存，可离线使用' : `缓存未完成 ${done}/${urls.length}，请检查网络后重试`);
-      refreshCacheStatus();
+      // 以 caches.match 为准，不以 fetch 成功数为准——以前 toast 说已缓存、状态栏说「未缓存 1/2」。
+      await refreshCacheStatus();
+      let cached = 0;
+      try {
+        const hits = await Promise.all(urls.map((u) => caches.match(u, { ignoreSearch: true }).then(Boolean)));
+        cached = hits.filter(Boolean).length;
+      } catch (e) { cached = done; }
+      toast(cached === urls.length ? '回测数据已缓存，可离线使用' : `缓存未完成 ${cached}/${urls.length}，请检查网络后重试`);
     };
   }
 }

@@ -6,13 +6,13 @@
  * 没有 ev 的股票在回测里一律不计分红——不猜日期、不编「4 月末」。不含税、不含佣金。
  */
 import {
-  db, loadMonthly, loadMonthlyFor, loadCmpScreen, loadCmpFin, loadPool,
+  db, loadMonthlyFor, loadCmpScreen, loadCmpFin, loadPool,
   loadFinanceHistory, loadDailyMeta, loadDailyMany, loadIndexDaily,
   nameOf, quote, ensureDividends,
 } from '../data.js';
 import { buildSeries, buildTradingDates, monthEnd, priceAt, maxDrawdown, prevDps, ddReport } from '../engine/market.js';
 import { runPortfolioBacktest } from '../engine/portfolioBacktest.js';
-import { runStockBacktest, runInvestBacktest } from '../engine/stockBacktest.js';
+import { runInvestBacktest } from '../engine/stockBacktest.js';
 import { runPlanBacktest } from '../engine/backtest.js';
 import { entryLabel } from '../engine/plan.js';
 import { loadTxs, loadCash, loadPlans, savePlan, loadSettings } from '../store.js';
@@ -565,7 +565,7 @@ function stockCards(r, structureData, market) {
  *  - 补「历史深回撤」列表：跌几次、每次多久，这才是持有体验；
  *  - 分红填坑改成一条进度条，别让人读句子算百分比。
  */
-function ddPanel(r, s, structureData, totalDiv) {
+function ddPanel(r, s, structureData) {
   const eps = (Array.isArray(r.episodes) ? r.episodes : []).slice().sort((a, b) => a.depth - b.depth);
   if (!eps.length) return '';
   const worst = eps[0];
@@ -628,7 +628,7 @@ function ddPanel(r, s, structureData, totalDiv) {
         <div class="dd-bar"><i style="width:${barW.toFixed(1)}%"></i></div>
         <div class="dd-fs">期间到账 <b class="num divc">${bigMoney(ddDiv)}</b>，全拿去再投</div>
       </div>
-      ${rows ? `<div class="dd-list"><div class="dd-lh">历史上跌超 15% 的一共 ${deeper.length} 次</div>${rows}</div>` : ''}
+      ${rows ? `<div class="dd-list"><div class="dd-lh">历史上跌超 15% 的一共 ${deeper.length} 次 · 最深那次就是上面那个数</div>${rows}</div>` : ''}
       ${verdict ? `<div class="dd-note">${verdict}</div>` : ''}
     </div>
   </section>`;
@@ -678,7 +678,7 @@ function stockDdPanel(r, st, name) {
         <div class="dd-bar"><i style="width:${barW.toFixed(1)}%"></i></div>
         <div class="dd-fs">期间到账 <b class="num divc">${bigMoney(worst.divReal || 0)}</b>，按除息日当天买回</div>
       </div>
-      ${rows ? `<div class="dd-list"><div class="dd-lh">历史上跌超 15% 的一共 ${deeper.length} 次</div>${rows}</div>` : ''}
+      ${rows ? `<div class="dd-list"><div class="dd-lh">历史上跌超 15% 的一共 ${deeper.length} 次 · 最深那次就是上面那个数</div>${rows}</div>` : ''}
       <div class="dd-note">${verdict}</div>
     </div>
   </section>`;
@@ -726,7 +726,6 @@ function renderPort(market, structureData) {
   const excess = s.excess != null ? s.excess * 100 : null;
   const totalDiv = r.totalDiv;
   const yearly = r.yearly;
-  const lastNav = r.nav[r.nav.length - 1];
   const cashNow = r.cashEnd;
   const divCagr = (() => {
     const ds = yearly.filter((y) => y.div > 0).map((y) => y.div);
@@ -737,8 +736,8 @@ function renderPort(market, structureData) {
 
   const cards = [
     { k: '总市值', v: bigMoney(r.end), cls: 'gold', s: `现金 ${bigMoney(cashNow)} · 仓位 ${((1 - cashNow / (r.end || 1)) * 100).toFixed(0)}%`, key: 'nav', on: btState.metric === 'nav' },
-    { k: useReplay ? '起点市值' : '累计投入', v: bigMoney(r.totalIn), cls: 'fund', s: hasAdd ? `本金 ${bigMoney(capital)} + 追加 ${bigMoney(r.totalIn - capital)}` : (useReplay ? '当前股数 × 起点价 + 现金' : '起点本金') },
-    { k: '净赚金额', v: bigMoney(r.end - r.totalIn), cls: upDown(r.end - r.totalIn), s: `期末 ${bigMoney(r.end)} − 投入 ${bigMoney(r.totalIn)}` },
+    { k: useReplay ? '起点市值' : '累计投入', v: bigMoney(r.totalIn), cls: 'fund', s: hasAdd ? `本金 ${bigMoney(capital)} + 追加 ${bigMoney(r.totalIn - capital)}` : (useReplay ? '当前股数 × 起点价 + 现金' : '起点本金'), key: 'fund', on: btState.metric === 'fund' },
+    { k: '净赚金额', v: bigMoney(r.end - r.totalIn), cls: upDown(r.end - r.totalIn), s: `期末 ${bigMoney(r.end)} − 投入 ${bigMoney(r.totalIn)}`, key: 'net', on: btState.metric === 'net' },
     { k: '年化', v: pctSign(s.cagr == null ? null : s.cagr * 100, 1), cls: vc, s: `${num(s.years, 1)} 年 · ${hasAdd ? 'XIRR' : '复利'}`, key: 'ann', on: btState.metric === 'ann' },
     { k: '红利不复投', v: bigMoney(r.endR), cls: 'fund', s: `年化 ${pctSign(s.cagrR == null ? null : s.cagrR * 100, 1)}`, key: 'navR', on: btState.metric === 'navR' },
     { k: '最大回撤', v: pct(s.mdd * 100, 1), cls: 'ddc', s: `${esc(s.mddPeak)} → ${esc(s.mddTrough)}`, key: 'dd', on: btState.metric === 'dd' },
@@ -764,7 +763,7 @@ function renderPort(market, structureData) {
   ${(r.builds && r.builds.length) || (r.pending && r.pending.length) ? `<div class="bt-buildnote">${(r.builds || []).map((b) => `<div>🏗 <b>${esc(nameOf(b.code))}</b> ${esc(b.date)} 建仓 ${num(b.shares, 0)} 股 @ ${num(b.price, 2)}（初始份额 × 期间组合增长；建仓前份额摊给已上市持仓）</div>`).join('')}${(r.pending || []).map((p) => `<div>⏳ <b>${esc(nameOf(p.code))}</b> 期末仍未建仓：${esc(p.reason)}${p.weight ? '（目标 ' + num(p.weight, 1) + '%）' : ''}</div>`).join('')}</div>` : ''}
   ${metricGrid(cards)}
   <div id="metricDetail" style="margin-top:12px"></div>
-  ${ddPanel(r, s, structureData, totalDiv)}
+  ${ddPanel(r, s, structureData)}
   ${displayPlan ? `<div class="row" style="gap:8px;margin-top:10px;align-items:center"><button class="btn sm ghost" id="btSavePlan">把当前结构存为方案</button><span class="bt-hint">存的是「代码 + 目标权重」，可切回对比</span></div>` : ''}
 
   <section class="panel fade-in" style="margin-top:14px">
@@ -877,6 +876,9 @@ function renderStockPage(market, structureData) {
   const st = r.stats;
   const vc = st.cagr >= 0 ? 'up' : 'down';
   const perYearAdd = btState.monthlyAdd * 12;
+  // 开了定投还用「期末 ÷ 本金」算收益，等于把追加的钱算成赚的（组合页早就改用 retFund）。
+  const hasAdd = r.totalIn > btState.capital;
+  const retBase = hasAdd ? (st.retFund ?? st.ret) : st.ret;
   const meta = stockMeta(code);
   const divTrades = r.trades.filter((t) => t.type === '分红复投' || t.type === '分红');
   const divRate = r.totalIn > 0 ? (r.totalDiv / r.totalIn) * 100 : null;
@@ -914,7 +916,7 @@ function renderStockPage(market, structureData) {
       { t: `vs 低波 ${pctSign(st.excessLowVol == null ? null : st.excessLowVol * 100, 1)}`, cls: 'lowvol' },
     ],
     stats: [
-      { k: '累计收益', v: pctSign(st.ret == null ? null : st.ret * 100, 1), cls: vc, s: `${num(st.years, 1)} 年 · 本金口径` },
+      { k: '累计收益', v: pctSign(retBase == null ? null : retBase * 100, 1), cls: vc, s: `${num(st.years, 1)} 年 · ${hasAdd ? '扣除追加' : '本金口径'}` },
       { k: '年化', v: pctSign(st.cagr == null ? null : st.cagr * 100, 1), cls: vc, s: perYearAdd > 0 ? 'XIRR 资金加权' : '复利折算' },
       { k: '最大回撤', v: pct(st.mdd * 100, 1), cls: 'ddc', s: `${esc(st.mddPeak)} → ${esc(st.mddTrough)}` },
       { k: '分红', v: bigMoney(r.totalDiv), cls: 'divc', s: `全部再投，滚了 ${st.reinvest} 次` },
@@ -1483,7 +1485,9 @@ export function bindBacktest() {
       nav: p.nav, navR: p.navR, bench: p.bench, lowVol: p.lowVol, dd: p.dd,
       divByY: p.divByY, capital: btState.portMode === 'replay' ? (p.nav[0]?.[1] || 1) : btState.capital,
     });
-    drawWaterfall(document.getElementById('wfChart'), { capital: btState.portMode === 'replay' ? (p.nav[0]?.[1] || 1) : btState.capital, div: p.totalDiv, end: p.end });
+    const wfBase = btState.portMode === 'replay' ? (p.nav[0]?.[1] || 1) : btState.capital;
+    // 个股页传了 add，组合页没传——10 年追加的钱全被记成「价格涨出来的」，和同页「累计投入」自相矛盾
+    drawWaterfall(document.getElementById('wfChart'), { capital: wfBase, add: Math.max(0, (p.totalIn || wfBase) - wfBase), div: p.totalDiv, end: p.end });
     drawEnvChart(document.getElementById('envChart'), envCompare(p.nav, ctx.benchRows, clampFrom(btState.from), btState.to));
     const simData = document.getElementById('simData');
     if (simData) {
@@ -1570,7 +1574,8 @@ function drawStockPageCharts() {
   if (!r) return;
   // 净值曲线是重点，直接画；日 K 在折叠里，展开时才画（见 bindBacktest 的 toggle）
   drawNavChart(document.getElementById('stNav'), {
-    nav: r.nav, bench: r.bench, lowVol: r.lowVol, dd: drawdownOf(r.nav),
+    // 回撤区必须走单位净值（剥离追加）：用总资产算，开了定投同页会出现两个「最大回撤」
+    nav: r.nav, bench: r.bench, lowVol: r.lowVol, dd: drawdownOf(r.unitNav || r.nav),
     divByY: r.divByY, capital: btState.capital,
   });
   const wfEl = document.getElementById('wfChart');
@@ -1664,7 +1669,7 @@ function renderStockMetric(key) {
     };
   } else if (key === 'dd') {
     html = base('回撤（水下）', '距历史最高点');
-    drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [{ name: '回撤%', rows: drawdownOf(r.nav), color: chartColors().dd }], { yFmt: (v) => v.toFixed(0) + '%' });
+    drawFn = () => drawMultiLineChart(document.getElementById('msChart'), [{ name: '回撤%', rows: drawdownOf(r.unitNav || r.nav), color: chartColors().dd }], { yFmt: (v) => v.toFixed(0) + '%' });
   } else if (key === 'div') {
     html = base('年度分红', '按除权除息日真实到账日复投，不够一手留现金');
     drawFn = () => drawDivChart(document.getElementById('msChart'), r.divByY);
@@ -1702,7 +1707,13 @@ function renderStockMetric(key) {
     };
   }
   box.innerHTML = html;
-  if (drawFn) requestAnimationFrame(() => setTimeout(drawFn, 20));
+  // 后台标签页里 rAF 会被暂停，图就是空的（和弹层那次同一个坑）：rAF 只当加速，定时器兜底。
+  if (drawFn) {
+    let drawn = false;
+    const run = () => { if (drawn) return; drawn = true; drawFn(); };
+    requestAnimationFrame(() => setTimeout(run, 20));
+    setTimeout(run, 160);
+  }
 }
 
 function drawdownOf(nav) {
@@ -1756,6 +1767,26 @@ function renderMetric(key) {
   } else if (key === 'dd') {
     html = `<section class="panel"><div class="panel-head"><span class="panel-title">回撤（水下）</span><span class="section-note">距历史最高点</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
     drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [{ name: '回撤%', rows: p.dd, color: chartColors().dd }], { yFmt: (v) => v.toFixed(0) + '%' });
+  } else if (key === 'fund' || key === 'net') {
+    // 这两张卡以前没有 data-metric：外观和别的卡一样，点了不亮、不弹、不滚。
+    const adds = (p.events || []).filter((e) => e.type === '追加' && e.amount > 0)
+      .map((e) => [e.date, e.amount]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    let j = 0;
+    let cum = capital;
+    const inRows = [];
+    const netRows = [];
+    for (const [d, v] of nav) {
+      while (j < adds.length && adds[j][0] <= d) { cum += adds[j][1]; j++; }
+      inRows.push([d, +(cum / 10000).toFixed(1)]);
+      netRows.push([d, +((v - cum) / 10000).toFixed(1)]);
+    }
+    if (key === 'fund') {
+      html = `<section class="panel"><div class="panel-head"><span class="panel-title">累计投入</span><span class="section-note">本金 + 每次追加（按到账日累计）</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
+      drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [{ name: '累计投入(万)', rows: inRows, color: chartColors().buy }], { yFmt: (v) => v.toFixed(0) + '万' });
+    } else {
+      html = `<section class="panel"><div class="panel-head"><span class="panel-title">净赚金额</span><span class="section-note">净值 − 累计投入（负数就是还亏着）</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
+      drawFn = () => drawMultiLineChart(document.getElementById('mChart'), [{ name: '净赚(万)', rows: netRows, color: chartColors().up }], { yFmt: (v) => v.toFixed(0) + '万' });
+    }
   } else if (key === 'div') {
     html = `<section class="panel"><div class="panel-head"><span class="panel-title">年度分红</span><span class="section-note">按真实除权除息日到账 · 柱 + 累计线</span></div><div class="panel-body" style="padding:8px 10px 4px"><div id="mChart" class="chart" style="height:300px"></div></div></section>`;
     drawFn = () => drawDivChart(document.getElementById('mChart'), p.divByY);
@@ -1772,7 +1803,14 @@ function renderMetric(key) {
     ], { yFmt: (v) => v.toFixed(0) });
   }
   box.innerHTML = html;
-  if (drawFn) requestAnimationFrame(() => setTimeout(drawFn, 20));
+  // 后台标签页里 requestAnimationFrame 会被浏览器暂停：点了指标卡、图是空的，
+  // 切回来也不会补——和弹层那次同一个坑（rAF 只当加速，兜底走定时器）。
+  if (drawFn) {
+    let drawn = false;
+    const run = () => { if (drawn) return; drawn = true; drawFn(); };
+    requestAnimationFrame(() => setTimeout(run, 20));
+    setTimeout(run, 160);
+  }
 }
 
 function drawYearCharts() {

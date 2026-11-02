@@ -37,7 +37,6 @@
 }
 .cal-bar.dim { background: linear-gradient(180deg, var(--surface-3), var(--surface-2)); }
 .cal-label { font-size: 9.5px; color: var(--text-3); }
-.cal-val { font-size: 9px; color: var(--text-2); white-space: nowrap; }
 
 .next-div {
   display: flex;
@@ -100,22 +99,6 @@
   .sym-pick { flex: 1 1 auto; max-width: none; }
   .sym-name { font-size: 18px; }
 }
-/* 回测页的「换一只」：照 iOS 搜索栏做——整行一条填充底、无边框、放大镜在左 */
-.stock-picker { margin: 0 0 16px; max-width: 560px; }
-.stock-picker .stock-search {
-  height: 38px; padding: 0 11px; gap: 8px;
-  border: 0; border-radius: 10px; background: var(--surface-2);
-  transition: background .15s;
-}
-.stock-picker .stock-search:focus-within { background: var(--surface-3); }
-.stock-picker .stock-search svg { width: 15px; height: 15px; color: var(--text-3); }
-.stock-picker .stock-search input { font-size: 13.5px; }
-/* 候选板要比搜索框高一档，不然两层灰糊在一起 */
-.stock-picker .search-suggest {
-  background: var(--surface-3); border-color: rgba(255,255,255,.07);
-  box-shadow: 0 16px 40px rgba(0,0,0,.55);
-}
-.stock-picker .search-suggest .sg-item.on { background: rgba(216, 168, 78, .14); }
 .stock-search {
   display: flex;
   align-items: center;
@@ -183,15 +166,7 @@
 .target-line .r { font-size: 14px; font-weight: 650; }
 
 .chart { width: 100%; height: 300px; }
-.chart.tall { height: 380px; }
 
-.signal-list { }
-.signal-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 12px; align-items: center; padding: 9px 14px; border-top: 1px solid var(--line); font-size: 11.5px; }
-.signal-row:first-child { border-top: 0; }
-.signal-row .d { color: var(--text-2); }
-.signal-row .pct { text-align: right; color: var(--text); font-weight: 600; }
-.signal-row .sig { text-align: right; }
-.signal-row .ret { text-align: right; min-width: 58px; font-weight: 600; }
 
 /* ============ 回测 ============ */
 .bt-params {
@@ -219,16 +194,6 @@
 .account-total { font-size: 38px; font-weight: 780; letter-spacing: -1.5px; line-height: 1.05; margin-top: 8px; }
 .account-total small { font-size: 16px; font-weight: 500; color: var(--text-2); letter-spacing: 0; }
 
-.plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-@media (max-width: 720px) { .plan-grid { grid-template-columns: 1fr; } }
-
-.plan-row { display: grid; grid-template-columns: minmax(0, 1fr) 46px 1fr 46px; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); font-size: 11.5px; }
-.plan-row:first-child { border-top: 0; }
-.plan-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plan-row .pct { text-align: right; color: var(--text-2); font-weight: 600; }
-.plan-bar { height: 5px; background: var(--surface-3); border-radius: 3px; overflow: hidden; }
-.plan-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
-.plan-bar.actual i { background: var(--info); }
 
 .health-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 @media (max-width: 640px) { .health-grid { grid-template-columns: 1fr 1fr; } }
@@ -237,11 +202,6 @@
 .health-cell .v { margin-top: 4px; font-size: 18px; font-weight: 700; }
 .health-cell .s { margin-top: 2px; font-size: 10px; color: var(--text-3); }
 
-/* 设置行 */
-.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 0; border-top: 1px solid var(--line); }
-.setting-row:first-child { border-top: 0; }
-.setting-row .l { font-size: 12.5px; }
-.setting-row .l small { display: block; margin-top: 2px; font-size: 10.5px; color: var(--text-3); }
 
 /* 数据来源 */
 .src-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 11.5px; }
@@ -272,7 +232,6 @@
 }
 
 /* ===== 回测页 v2：参数条 / 指标卡 / 折叠 / 构成 ===== */
-.bt-params { padding: 14px 16px; }
 .bt-bar { display: flex; align-items: center; gap: 10px; }
 .bt-summary { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: var(--r); background: var(--surface-2); border: 1px solid var(--line); color: var(--text-2); font-size: 12.5px; text-align: left; }
 .bt-summary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
@@ -522,7 +481,6 @@
 .input.bad { border-color: rgba(224, 163, 62, .55); }
 
 /* 执行清单 */
-.plan-exec-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .pstat { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-2); padding: 10px 12px; min-width: 0; }
 .pstat-k { font-size: 10.5px; color: var(--text-3); }
 .pstat-v { font-size: 16px; font-weight: 700; font-family: var(--mono); margin-top: 2px; letter-spacing: -.3px; overflow: hidden; text-overflow: ellipsis; }
@@ -551,15 +509,13 @@
   .editor-basics { grid-template-columns: 1fr; }
   .plan-edit-row { grid-template-columns: minmax(0, 1fr) 86px 26px; gap: 8px; }
   .per-bar { display: none; }
-  .plan-exec-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .plan-ops { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
   .pstat-v { font-size: 15px; }
 }
 /* 方案编辑器补充 */
 .panel-head.editor-head { justify-content: flex-start; gap: 10px; flex-wrap: wrap; }
 .plan-edit-empty { padding: 22px 12px; text-align: center; font-size: 11.5px; color: var(--text-3); border: 1px dashed var(--line-strong); border-radius: var(--r); margin: 6px 0; }
-.plan-exec-hero { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-@media (max-width: 900px) { .plan-exec-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.plan-exec-hero { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 /* 执行清单：手机卡片 */
 .plan-exec-cards { display: none; }
 @media (max-width: 720px) {
@@ -606,7 +562,6 @@
   font-size: 10.5px; color: var(--text-3); white-space: nowrap; margin-left: auto;
   overflow: hidden; text-overflow: ellipsis; max-width: 62%;
 }
-.sg-item .sg-hl { color: var(--accent-2, var(--accent)); }
 .sg-item:hover, .sg-item.on { background: var(--surface-3, rgba(255,255,255,.06)); }
 .sg-item.sg-loading { cursor: default; color: var(--text-3); }
 .sg-item.sg-empty { cursor: default; color: var(--text-3); }

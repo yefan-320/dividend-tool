@@ -36,5 +36,6 @@ jobs:
           node tools/check-pwa.mjs
           node tools/check-plan-flow.mjs
           node tools/check-backtest-modes.mjs
+          node tools/check-ui-state.mjs
           node tools/check-ios.mjs
           node tools/check-offline.mjs

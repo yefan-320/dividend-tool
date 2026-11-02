@@ -76,6 +76,13 @@ await send('Page.enable');
 await send('Runtime.enable');
 await send('Network.enable');
 await send('Network.setCacheDisabled', { cacheDisabled: true });
+/* 清 IndexedDB 里的行情缓存：页面会读上次刷到的实时价，Node 侧的期望值却按 data/quotes.json
+   的快照算——两边价不一样，整手股数就会差 100/400 股，看着像 bug，其实是测试环境不确定。
+   check-backtest-modes 早就这么做了，这里漏了。 */
+await send('Storage.clearDataForOrigin', {
+  origin: SITE.replace(/\/[^/]*$/, ''),
+  storageTypes: 'indexeddb,service_workers,cache_storage,local_storage',
+}).catch(() => {});
 
 const BASE = SITE + (SITE.includes('?') ? '&' : '?') + 'nosw=1&theme=dark';
 const failures = [];
