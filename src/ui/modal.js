@@ -66,13 +66,19 @@ export function openModal({ title, body, actions = [], onMount, width }) {
       if (a.close !== false) closeModal();
     };
   });
-  requestAnimationFrame(() => {
+  // 后台标签页的 requestAnimationFrame 会被浏览器暂停，弹层就永远「不显示」（DOM 在、类不在）。
+  // 先同步补一次 show（幂等），rAF 只负责让过渡动画从起点开始。
+  const reveal = () => {
     backdrop.classList.add('show');
     modal.classList.add('show');
     document.body.classList.add('modal-open');
+  };
+  reveal();
+  requestAnimationFrame(reveal);
+  setTimeout(() => {
     const first = modal.querySelector('input, select, textarea');
-    if (first) setTimeout(() => first.focus(), 60);
-  });
+    if (first) first.focus();
+  }, 60);
   if (onMount) onMount(modal);
 }
 
