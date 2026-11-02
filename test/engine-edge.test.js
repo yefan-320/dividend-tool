@@ -625,7 +625,7 @@ test('finance 边界：XIRR 一年 10%、无解 null、annualize/asRate 边界�
   assert.deepEqual(monthlyReturns([{ date: '2020-01', value: 1 }]), []);
 });
 
-test('verdict 阈值边界：5% / 4% / 15% / 支付率 85% / 现金流覆盖 0.7 / 支付率 20%', () => {
+test('verdict 阈值边界：5% / 4% / 8% 上限 / 15% / 支付率 80% / 现金流覆盖 0.7 / 支付率 20%', () => {
   const healthy = (eps, ocfps, roe = 12) => [eps, roe, 10, 50, ocfps, 1e8];
   const fiveYears = (dps) => ({ years: { 2020: dps, 2021: dps, 2022: dps, 2023: dps, 2024: dps } });
   const fourYears = (dps) => ({ years: { 2021: dps, 2022: dps, 2023: dps, 2024: dps } });
@@ -638,12 +638,15 @@ test('verdict 阈值边界：5% / 4% / 15% / 支付率 85% / 现金流覆盖 0.7
   // 股息率门槛：恰好 5% 且连续 5 年 → 可买；4.99% → 观察
   assert.equal(ev({ dps: 0.5 }).level, 'buy');
   assert.equal(ev({ dps: 0.5, price: 10.02 }).level, 'wait');
-  // 股息率异常：恰好 15% 仍按正常规则（健康→可买），>15% 一律回避
-  assert.equal(ev({ dps: 1.5, fin: healthy(2.0, 2.5) }).level, 'buy');
+  // 股息率上限 8%：恰好 8% 仍可买，8.1% 落到「太高」那一段 → 观察
+  assert.equal(ev({ dps: 0.8, fin: healthy(1.2, 1.5) }).level, 'buy');
+  assert.equal(ev({ dps: 0.81, fin: healthy(1.2, 1.5) }).level, 'wait');
+  // 15%：落在太高段，观察；>15% 一律回避（多为一次性分红）
+  assert.equal(ev({ dps: 1.5, fin: healthy(2.0, 2.5) }).level, 'wait');
   assert.equal(ev({ dps: 1.51, fin: healthy(2.0, 2.5) }).level, 'avoid');
-  // 支付率：恰好 85% → 回避；84.9% → 可买
-  assert.equal(ev({ dps: 0.85 }).level, 'avoid');
-  assert.equal(ev({ dps: 0.849 }).level, 'buy');
+  // 支付率：恰好 80% → 回避；79.9% → 可买
+  assert.equal(ev({ dps: 0.8, fin: healthy(1.0, 1.3) }).level, 'avoid');
+  assert.equal(ev({ dps: 0.799, fin: healthy(1.0, 1.3) }).level, 'buy');
   // 现金流覆盖：恰好 0.7 → 通过；0.699 → 回避
   assert.equal(ev({ dps: 0.5, fin: healthy(1.0, 0.7) }).level, 'buy');
   assert.equal(ev({ dps: 0.5, fin: healthy(1.0, 0.699) }).level, 'avoid');

@@ -111,7 +111,9 @@ export function evaluate(code, ctx) {
   }
 
   // 4. 分红可持续性硬约束
-  if (metrics.payout != null && metrics.payout >= 85) {
+  // 80% 而不是 85%：研究里「派息率 10%–80%」是模型的实际门槛，
+  // 83% 那种已经是在硬撑分红了，不该给「可买」。
+  if (metrics.payout != null && metrics.payout >= 80) {
     reasons.push(`支付率 ${metrics.payout.toFixed(0)}%，把利润几乎分光，不可持续`);
     return { code, name: q?.n || code, level: 'avoid', reasons, metrics };
   }
@@ -128,7 +130,15 @@ export function evaluate(code, ctx) {
     return { code, name: q?.n || code, level: 'avoid', reasons, metrics };
   }
 
-  // 5. 股息率门槛
+  // 5. 股息率太高：8% 以上不是机会，是市场在定价「这次分红撑不住」。
+  //    研究（tools/research/README.md 发现二）里 8–9% 这一档几何年化只有 7.0%，
+  //    而 5–6.5% 那一档是 16.9%——同一套筛选规则，光改股息率区间就差一倍多。
+  if (dy != null && dy > 8) {
+    reasons.push(`股息率 ${dy.toFixed(1)}%，已经进了「太高」那一段：8%–9% 这一档的长期年化只有 7.0%，5%–6.5% 那一档是 16.9%。市场肯给这么高的股息率，往往是在说这次分红撑不住，先当观察，别急着加仓`);
+    return { code, name: q?.n || code, level: 'wait', reasons, metrics };
+  }
+
+  // 6. 股息率门槛
   if (dy != null && dy >= 5 && consecutive >= 5) {
     reasons.push(`股息率 ${dy.toFixed(1)}%、连续分红 ${consecutive} 年、支付率 ${metrics.payout == null ? '—' : metrics.payout.toFixed(0) + '%'}、现金流覆盖 ${metrics.ocfCover == null ? '—' : metrics.ocfCover.toFixed(2)}`);
     return { code, name: q?.n || code, level: 'buy', reasons, metrics };

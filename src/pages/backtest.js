@@ -575,7 +575,7 @@ function ddPanel(r, s, structureData, totalDiv) {
   let verdict = '';
   const downMonths = Math.max(1, Math.round(downDays / 30.4));
   if (fill != null && fill > 5) {
-    verdict = `这一轮跌了 ${downMonths} 个月，期间分红到账 <b class="num gold">${bigMoney(ddDiv)}</b>，相当于把 ${Math.abs(s.mdd * 100).toFixed(1)}% 的坑填掉 <b>${fill.toFixed(0)}%</b>。红利策略抗跌的真处在这儿：股价在跌，现金还在进来。`;
+    verdict = `这一轮跌了 ${downMonths} 个月，期间分红到账 <b class="num gold">${bigMoney(ddDiv)}</b>，相当于把 ${Math.abs(s.mdd * 100).toFixed(1)}% 的坑填掉 <b>${fill.toFixed(0)}%</b>。红利真正抗跌的地方就在这儿：股价在跌，现金还在进来。`;
   } else if (fill != null) {
     verdict = `这一轮跌了 ${downMonths} 个月，期间只碰到 ${bigMoney(ddDiv)} 分红，几乎没帮上忙——红利股一年也就发一两次钱，短期急跌指望分红补是不现实的。`;
   }

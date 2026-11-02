@@ -298,7 +298,7 @@
 .dd-note { margin-top: 10px; font-size: 12px; line-height: 1.7; color: var(--text-2); padding: 11px 13px; border-radius: var(--r); background: var(--surface-2); border-left: 2px solid var(--accent); }
 .dd-note b { color: var(--text); }
 .dd-warn { display: flex; gap: 9px; align-items: flex-start; font-size: 11.5px; line-height: 1.65; color: var(--text-2); background: color-mix(in srgb, var(--warn) 9%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 26%, transparent); border-radius: var(--r); padding: 10px 12px; margin-bottom: 10px; }
-.dd-warn svg { flex: 0 0 auto; margin-top: 1px; color: var(--warn); }
+.dd-warn svg { width: 15px; height: 15px; flex: 0 0 auto; margin-top: 1px; color: var(--warn); }
 .dd-warn b { color: var(--text); }
 /* 对比表里的回撤条：同一尺度比长短，谁跌得狠一眼看得出来 */
 .ddc.num, .stat-value.ddc { color: var(--c-dd); }
@@ -329,6 +329,9 @@
 @media (max-width: 640px) {
   .st-meta { grid-template-columns: 1fr 1fr; }
   .st-inds { grid-template-columns: 1fr; }
+  /* 堆叠成卡片后表格没有列宽参照，回撤条会压到左侧标签上，窄屏只留数字 */
+  table.table.stack-on-mobile .ddcell i { display: none; }
+  table.table.stack-on-mobile .ddcell { padding-right: 0; }
 }
 .fold { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); margin-top: 14px; overflow: hidden; }
 .fold > summary { list-style: none; cursor: pointer; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
